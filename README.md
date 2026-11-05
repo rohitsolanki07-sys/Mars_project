@@ -5,7 +5,7 @@ Mars Navigator is a small web application for viewing simulated EVA routes, haza
 ## Project structure
 
 ```text
-backend/
+backend/. --Edited part
   Data/
     marsData.json
   Services/
