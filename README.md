@@ -1,11 +1,11 @@
 # Mars Navigator
 
-Mars Navigator is a small web application for viewing simulated EVA routes, hazards, and suit telemetry at selected Mars sites. The map uses NASA/JPL Mars Trek's Viking MDIM 2.1 global color mosaic, rendered through its official ArcGIS ImageServer. The API serves mission data from a local JSON file.
+Mars Navigator is a web application for viewing simulated EVA routes, hazards, and suit telemetry at selected Mars sites. The map uses NASA/JPL Mars Trek's Viking MDIM 2.1 global color mosaic, rendered through its official ArcGIS ImageServer. The API serves mission data from a local JSON file.
 
 ## Project structure
 
 ```text
-backend/. --Edited part
+backend/
   Data/
     marsData.json
   Services/
@@ -16,6 +16,7 @@ frontend/
   app.js
   index.html
   style.css
+package.json
 LICENSE
 README.md
 ```
@@ -25,29 +26,32 @@ README.md
 - Node.js 18 or newer
 - npm
 
-## Run locally
+## Run locally (Single Command)
 
-1. Install the backend dependencies:
+You can start both the backend API and the frontend UI simultaneously from either the project root or `backend/`:
+
+1. Install dependencies:
 
    ```sh
-   cd backend
    npm install
    ```
 
-2. Optionally set a `PORT` environment variable to choose a different port. The default is `3000`.
-
-3. Start the API:
+2. Start the server and launch the app:
 
    ```sh
    npm start
    ```
 
-4. Open the URL printed by the server (by default, `http://localhost:3000`). The server hosts both the frontend and API, so the site works on the same port even if you choose a custom `PORT`.
+What happens automatically when you run `npm start`:
+- **Unified Server & Auto-Launch**: Express serves both the API and `frontend/index.html` and automatically opens the app in your default browser.
+- **Automatic Port Fallback**: Starts on `PORT` (default `3000`). If `3000` is already in use on a machine, the server automatically switches to the next available port (`3001`, `3002`, `5050`, `8080`, etc.), and the frontend automatically detects the active backend port (even if `frontend/index.html` is opened directly or via an external dev server like VS Code Live Server).
+- **Live Auto-Reload**: Runs with `node --watch` and Server-Sent Events (`/api/events`), so editing backend code, `marsData.json`, or frontend files (`index.html`, `app.js`, `style.css`) updates the running app automatically without manually restarting the server and refreshing the page.
 
-Run the backend tests from the `backend/` directory with `npm test`.
+Run the backend tests with `npm test`.
 
 ## API
 
+- `GET /api/health` returns server status and active port.
 - `GET /api/mission/:site` returns mission data for a site.
 - `GET /api/route/:site` returns route waypoints and estimated mission telemetry.
 

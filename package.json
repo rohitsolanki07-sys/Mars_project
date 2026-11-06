@@ -1,0 +1,15 @@
+{
+  "name": "mars_navigator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mars Navigator EVA route planner — unified root runner for backend and frontend.",
+  "scripts": {
+    "install-all": "npm --prefix backend install",
+    "postinstall": "npm --prefix backend install",
+    "start": "npm --prefix backend start",
+    "dev": "npm --prefix backend run dev",
+    "serve": "npm --prefix backend run serve",
+    "test": "npm --prefix backend test"
+  },
+  "license": "MIT"
+}
