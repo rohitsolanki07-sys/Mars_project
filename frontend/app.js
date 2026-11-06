@@ -201,14 +201,17 @@ let currentRouteLine = null;
 let currentWaypoints = [];
 let currentRouteEndpoints = { departure: null, arrival: null };
 let endpointSiteKey = null;
+let currentSiteDetails = null;
+let loadedNASAPlaces = [];
+let selectedNASAEndpointLocations = { departure: null, arrival: null };
+let customEndpointLocations = { departure: null, arrival: null };
+let mapPickMode = null;
 let navAnimationTimer = null;
 let navMarker = null;
 
 function getRouteLocations(siteData) {
   const waypoints = siteData.safe_route || [];
-  if (waypoints.length < 2) return [];
-
-  return waypoints.map((coords, index) => {
+  const routeLocations = waypoints.map((coords, index) => {
     const isDeparture = index === 0;
     const isArrival = index === waypoints.length - 1;
     return {
@@ -222,27 +225,82 @@ function getRouteLocations(siteData) {
       routeIndex: index
     };
   });
+
+  const nasaPlaces = new Map(
+    [...loadedNASAPlaces, ...Object.values(selectedNASAEndpointLocations).filter(Boolean)]
+      .map((place) => [place.id, place])
+  );
+  const nasaLocations = Array.from(nasaPlaces.values()).map((place) => ({
+    id: `place:${place.id}`,
+    name: [
+      place.name,
+      place.featureType,
+      place.sizeKm ? `${place.sizeKm.toFixed(1)} km` : '',
+      Number.isFinite(place.elevationM) ? `${place.elevationM.toLocaleString()} m` : '',
+      'NASA'
+    ].filter(Boolean).join(' · '),
+    coords: [place.latitude, place.longitude],
+    elevationM: place.elevationM,
+    place
+  }));
+  const customLocations = Object.values(customEndpointLocations)
+    .filter(Boolean)
+    .map((location) => ({
+      ...location,
+      name: Number.isFinite(location.elevationM)
+        ? `${location.name} · ${location.elevationM.toLocaleString()} m MOLA`
+        : location.name
+    }));
+
+  return [...routeLocations, ...nasaLocations, ...customLocations];
 }
 
 function populateRouteSelectors(siteData) {
   const departureSelect = document.getElementById('departureSelect');
   const arrivalSelect = document.getElementById('arrivalSelect');
-  const locations = getRouteLocations(siteData);
-  if (!departureSelect || !arrivalSelect || locations.length < 2) return locations;
-
+  if (!departureSelect || !arrivalSelect) return [];
   const site = document.getElementById('siteSelect').value;
   const siteChanged = endpointSiteKey !== site;
+  if (siteChanged) {
+    customEndpointLocations = { departure: null, arrival: null };
+    selectedNASAEndpointLocations = { departure: null, arrival: null };
+    loadedNASAPlaces = [];
+  }
+  const locations = getRouteLocations(siteData);
+  if (locations.length < 2) return locations;
   const previousDeparture = departureSelect.value;
   const previousArrival = arrivalSelect.value;
   const locationIds = new Set(locations.map((location) => location.id));
 
   [departureSelect, arrivalSelect].forEach((select) => {
-    select.replaceChildren(...locations.map((location) => {
-      const option = document.createElement('option');
-      option.value = location.id;
-      option.textContent = location.name;
-      return option;
-    }));
+    const groups = [
+      {
+        label: 'Saved mission route',
+        locations: locations.filter((location) => Number.isInteger(location.routeIndex))
+      },
+      {
+        label: 'NASA Mars Trek places in the current map area',
+        locations: locations.filter((location) => location.place)
+      },
+      {
+        label: 'Custom map points',
+        locations: locations.filter((location) => location.custom)
+      }
+    ];
+
+    select.replaceChildren(...groups
+      .filter((group) => group.locations.length)
+      .map((group) => {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = group.label;
+        group.locations.forEach((location) => {
+          const option = document.createElement('option');
+          option.value = location.id;
+          option.textContent = location.name;
+          optgroup.append(option);
+        });
+        return optgroup;
+      }));
   });
 
   departureSelect.value = !siteChanged && locationIds.has(previousDeparture)
@@ -250,7 +308,8 @@ function populateRouteSelectors(siteData) {
     : locations[0].id;
   arrivalSelect.value = !siteChanged && locationIds.has(previousArrival)
     ? previousArrival
-    : locations[locations.length - 1].id;
+    : locations.find((location) => location.id === 'target')?.id ||
+      locations[locations.length - 1].id;
 
   if (departureSelect.value === arrivalSelect.value) {
     arrivalSelect.value = locations.find((location) => location.id !== departureSelect.value).id;
@@ -261,6 +320,14 @@ function populateRouteSelectors(siteData) {
 }
 
 function getRouteBetweenLocations(siteData, departure, arrival) {
+  if (!departure || !arrival) {
+    throw new Error('Choose both a start point and a destination.');
+  }
+
+  if (!Number.isInteger(departure.routeIndex) || !Number.isInteger(arrival.routeIndex)) {
+    return [departure.coords, arrival.coords];
+  }
+
   const safeRoute = siteData.safe_route || [];
   const step = departure.routeIndex < arrival.routeIndex ? 1 : -1;
   const route = [];
@@ -292,6 +359,47 @@ function calculateBearingCardinal(coord1, coord2) {
   const deg = (angle + 360) % 360;
   const dirs = ['North', 'Northeast', 'East', 'Southeast', 'South', 'Southwest', 'West', 'Northwest'];
   return dirs[Math.round(deg / 45) % 8];
+}
+
+function elevationColor(elevationM) {
+  if (!Number.isFinite(elevationM)) return '#38bdf8';
+  const elevationRange = Math.max(0, Math.min(1, (elevationM + 8500) / 30000));
+  const hue = 215 - elevationRange * 205;
+  return `hsl(${hue}, 85%, 58%)`;
+}
+
+function findLabelPlacement(point, width, occupied, viewport) {
+  const placements = [
+    { direction: 'right', left: point.x + 10, top: point.y - 13 },
+    { direction: 'left', left: point.x - width - 10, top: point.y - 13 },
+    { direction: 'top', left: point.x - width / 2, top: point.y - 30 },
+    { direction: 'bottom', left: point.x - width / 2, top: point.y + 10 }
+  ];
+
+  for (const placement of placements) {
+    const box = {
+      left: placement.left,
+      right: placement.left + width,
+      top: placement.top,
+      bottom: placement.top + 26
+    };
+    const insideMap =
+      box.left >= 4 &&
+      box.right <= viewport.x - 4 &&
+      box.top >= 4 &&
+      box.bottom <= viewport.y - 4;
+    const overlaps = occupied.some(
+      (other) =>
+        box.left < other.right + 6 &&
+        box.right + 6 > other.left &&
+        box.top < other.bottom + 5 &&
+        box.bottom + 5 > other.top
+    );
+
+    if (insideMap && !overlaps) return { ...placement, box };
+  }
+
+  return null;
 }
 
 function buildPlaceQueryUrl(layer, bounds) {
@@ -493,6 +601,13 @@ function createPlacePopup(place) {
     'Coordinates',
     `${Math.abs(place.latitude).toFixed(4)}° ${latitudeDirection}, ${Math.abs(place.longitude).toFixed(4)}° ${longitudeDirection}`
   );
+  addPlacePopupRow(
+    popup,
+    'MOLA elevation',
+    Number.isFinite(place.elevationM)
+      ? `${place.elevationM.toLocaleString()} m relative to Mars datum`
+      : ''
+  );
   addPlacePopupRow(popup, 'Description', place.description);
   addPlacePopupRow(popup, 'Notes', place.notes);
   addPlacePopupRow(popup, 'Approval date', place.approvalDate);
@@ -542,6 +657,7 @@ function clearPlaceNameLayers() {
 
 function renderNASAPlaces(places, bounds, warnings) {
   clearPlaceNameLayers();
+  loadedNASAPlaces = places;
   const currentBounds = L.latLngBounds(
     [bounds[1], bounds[0]],
     [bounds[3], bounds[2]]
@@ -555,37 +671,89 @@ function renderNASAPlaces(places, bounds, warnings) {
       ? visiblePlaces.filter((place) => place.sourceName !== 'Official Mars nomenclature')
       : visiblePlaces;
 
-  labels.forEach((place) => {
+  if (currentSiteDetails) populateRouteSelectors(currentSiteDetails);
+
+  const selectedPlaces = new Set(
+    Object.values(selectedNASAEndpointLocations)
+      .filter(Boolean)
+      .map((place) => place.id)
+  );
+  const candidates = [...labels].sort((a, b) => {
+    const selectedDifference =
+      Number(selectedPlaces.has(b.id)) - Number(selectedPlaces.has(a.id));
+    if (selectedDifference) return selectedDifference;
+    const elevationDifference =
+      Number(Number.isFinite(b.elevationM)) - Number(Number.isFinite(a.elevationM));
+    if (elevationDifference) return elevationDifference;
+    return (b.elevationM ?? -Infinity) - (a.elevationM ?? -Infinity);
+  });
+  const maxLabels = zoom < 5 ? 45 : zoom < 7 ? 90 : 150;
+  const occupiedLabelAreas = [];
+  const mapSize = map.getSize();
+  let visibleLabelCount = 0;
+
+  candidates.forEach((place) => {
+    if (visibleLabelCount >= maxLabels) return;
+    const nameWidth = Math.min(190, Math.max(40, place.name.length * 7));
+    const elevationWidth = Number.isFinite(place.elevationM) ? 58 : 0;
+    const labelWidth = nameWidth + elevationWidth + 18;
+    const point = map.latLngToContainerPoint([place.latitude, place.longitude]);
+    const placement = findLabelPlacement(
+      point,
+      labelWidth,
+      occupiedLabelAreas,
+      mapSize
+    );
+    if (!placement) return;
+
+    occupiedLabelAreas.push(placement.box);
+
     const label = document.createElement('span');
     label.className = 'mars-place-label';
-    label.textContent = place.name;
+    const name = document.createElement('span');
+    name.className = 'mars-place-label-name';
+    name.textContent = place.name;
+    label.append(name);
+
+    if (Number.isFinite(place.elevationM)) {
+      const elevation = document.createElement('span');
+      elevation.className = 'mars-place-label-elevation';
+      elevation.textContent = `${place.elevationM.toLocaleString()} m`;
+      label.append(elevation);
+    }
 
     L.circleMarker([place.latitude, place.longitude], {
       radius: place.sourceName === 'Named regions' ? 3 : 4,
       color: '#f8fafc',
       weight: 1,
-      fillColor: place.sourceName === 'Named regions' ? '#fbbf24' : '#38bdf8',
+      fillColor: elevationColor(place.elevationM),
       fillOpacity: 0.95
     })
+      .on('click', (event) => selectCustomMapPoint(event.latlng))
       .bindTooltip(label, {
         permanent: true,
-        direction: 'right',
-        offset: [6, 0],
+        direction: placement.direction,
+        offset:
+          placement.direction === 'right'
+            ? [6, 0]
+            : placement.direction === 'left'
+            ? [-6, 0]
+            : placement.direction === 'top'
+            ? [0, -6]
+            : [0, 6],
         className: 'mars-place-tooltip'
       })
       .bindPopup(createPlacePopup(place), { maxWidth: 320 })
       .addTo(placeNamesLayerGroup);
+    visibleLabelCount += 1;
   });
 
   const status = document.getElementById('placesStatus');
   if (status) {
-    const countText = `${labels.length} NASA place${labels.length === 1 ? '' : 's'}`;
-    status.textContent =
-      zoom < 4
-        ? `${countText} · zoom in for detailed names`
-        : warnings.length
-        ? `${countText} · some NASA layers unavailable`
-        : countText;
+    const countText = `${places.length} NASA places in selection · ${visibleLabelCount} labels shown`;
+    status.textContent = warnings.length
+      ? `${countText} · some NASA layers unavailable`
+      : countText;
   }
 }
 
@@ -633,6 +801,146 @@ async function refreshNASAPlaceNames() {
 function scheduleNASAPlaceNameRefresh() {
   clearTimeout(placeNamesRefreshTimer);
   placeNamesRefreshTimer = setTimeout(refreshNASAPlaceNames, 250);
+}
+
+function updateMapPickControls() {
+  const status = document.getElementById('mapPickStatus');
+  const departureButton = document.getElementById('pickDepartureBtn');
+  const arrivalButton = document.getElementById('pickArrivalBtn');
+  const isPickingDeparture = mapPickMode === 'departure';
+  const isPickingArrival = mapPickMode === 'arrival';
+
+  departureButton?.classList.toggle('active', isPickingDeparture);
+  arrivalButton?.classList.toggle('active', isPickingArrival);
+  map.getContainer().classList.toggle('map-picking-point', Boolean(mapPickMode));
+  if (status) {
+    status.textContent = isPickingDeparture
+      ? 'Click the map to set your custom starting point. Press Escape to cancel.'
+      : isPickingArrival
+      ? 'Click the map to set your custom destination. Press Escape to cancel.'
+      : '';
+  }
+}
+
+function beginMapPointSelection(endpoint) {
+  mapPickMode = endpoint;
+  updateMapPickControls();
+}
+
+function cancelMapPointSelection() {
+  if (!mapPickMode) return;
+  mapPickMode = null;
+  updateMapPickControls();
+}
+
+function syncCoordinateInputs(departure, arrival) {
+  const locations = [
+    ['departure', departure],
+    ['arrival', arrival]
+  ];
+  locations.forEach(([endpoint, location]) => {
+    if (!location) return;
+    document.getElementById(`${endpoint}Latitude`).value = location.coords[0];
+    document.getElementById(`${endpoint}Longitude`).value = location.coords[1];
+  });
+}
+
+async function sampleNASAElevation(latitude, longitude) {
+  const urls = [];
+  if (window.location.protocol !== 'file:') {
+    urls.push(new URL('/api/elevation', window.location.origin));
+  }
+
+  const isLocalPage =
+    window.location.protocol === 'file:' ||
+    ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+  if (isLocalPage) {
+    const host =
+      window.location.protocol === 'file:'
+        ? 'localhost'
+        : window.location.hostname;
+    const ports = new Set([window.location.port, ...LOCAL_BACKEND_PORTS]);
+    for (const port of ports) {
+      if (port) urls.push(new URL('/api/elevation', `http://${host}:${port}`));
+    }
+  }
+
+  for (const url of urls) {
+    url.searchParams.set('points', `${latitude},${longitude}`);
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!response.ok) continue;
+      const result = await response.json();
+      const elevationM = result.elevations?.[0]?.elevation_m;
+      if (result.success && Number.isFinite(elevationM)) return elevationM;
+    } catch (error) {
+      console.warn('NASA elevation lookup failed:', error.message);
+    }
+  }
+  return null;
+}
+
+async function setCustomEndpoint(endpoint, latitude, longitude) {
+  const coordinateStatus = document.getElementById('coordinateStatus');
+  if (coordinateStatus) coordinateStatus.textContent = 'Looking up NASA MOLA elevation...';
+  const elevationM = await sampleNASAElevation(latitude, longitude);
+  const pointName = `Custom point (${latitude.toFixed(4)}°, ${longitude.toFixed(4)}°)`;
+  const location = {
+    id: `custom-${endpoint}`,
+    name: pointName,
+    coords: [latitude, longitude],
+    elevationM,
+    custom: true
+  };
+
+  if (!Number.isFinite(elevationM) && coordinateStatus) {
+    coordinateStatus.textContent = 'Point saved; NASA MOLA elevation is unavailable.';
+  }
+  customEndpointLocations[endpoint] = location;
+  selectedNASAEndpointLocations[endpoint] = null;
+  cancelMapPointSelection();
+  populateRouteSelectors(currentSiteDetails);
+  document.getElementById(`${endpoint}Select`).value = location.id;
+  syncCoordinateInputs(
+    endpoint === 'departure' ? location : null,
+    endpoint === 'arrival' ? location : null
+  );
+  if (Number.isFinite(elevationM) && coordinateStatus) {
+    coordinateStatus.textContent = `NASA MOLA elevation: ${elevationM.toLocaleString()} m relative to Mars datum.`;
+  }
+  loadMissionRoute();
+}
+
+function selectCustomMapPoint(latlng) {
+  if (!mapPickMode || !currentSiteDetails) return;
+
+  const endpoint = mapPickMode;
+  const latitude = Number(latlng.lat.toFixed(5));
+  const longitude = Number(latlng.lng.toFixed(5));
+  setCustomEndpoint(endpoint, latitude, longitude);
+}
+
+function handleCoordinateFormSubmit(event, endpoint) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (!form.reportValidity()) return;
+
+  const latitude = form.elements.latitude.valueAsNumber;
+  const longitude = form.elements.longitude.valueAsNumber;
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    form.reportValidity();
+    return;
+  }
+
+  cancelMapPointSelection();
+  setCustomEndpoint(endpoint, Number(latitude.toFixed(5)), Number(longitude.toFixed(5)));
 }
 
 function buildPlanFromSiteData(siteData, routeWaypoints = siteData.safe_route || []) {
@@ -793,9 +1101,29 @@ async function loadMissionRoute() {
   try {
     const loadedPlan = await getMissionPlan(site);
     const details = loadedPlan.site_details || FALLBACK_MARS_DATA[site.toLowerCase()];
+    currentSiteDetails = details;
     const routeLocations = populateRouteSelectors(details);
     const departure = routeLocations.find((location) => location.id === document.getElementById('departureSelect').value);
     const arrival = routeLocations.find((location) => location.id === document.getElementById('arrivalSelect').value);
+    syncCoordinateInputs(departure, arrival);
+    const coordinateStatus = document.getElementById('coordinateStatus');
+    const endpointElevations = [departure, arrival]
+      .map((location, index) => {
+        if (!Number.isFinite(location?.elevationM)) return null;
+        const label = location.custom
+          ? index === 0
+            ? 'Custom start'
+            : 'Custom destination'
+          : location.name;
+        return `${label}: ${location.elevationM.toLocaleString()} m`;
+      })
+      .filter(Boolean);
+    if (coordinateStatus && endpointElevations.length) {
+      coordinateStatus.textContent = `NASA MOLA elevation · ${endpointElevations.join(' · ')}`;
+    }
+    const usesSavedRoute =
+      Number.isInteger(departure?.routeIndex) &&
+      Number.isInteger(arrival?.routeIndex);
     const waypoints = getRouteBetweenLocations(details, departure, arrival);
     const plan = buildPlanFromSiteData(details, waypoints);
     currentRouteEndpoints = { departure, arrival };
@@ -811,6 +1139,9 @@ async function loadMissionRoute() {
     document.getElementById('missionStatus').innerText = plan.mission_status;
     document.getElementById('distVal').innerText = plan.total_distance_km;
     document.getElementById('timeVal').innerText = plan.total_duration_hours;
+    document.getElementById('routeMetaDesc').innerText = usesSavedRoute
+      ? 'Saved mission route through planned waypoints'
+      : 'Direct point-to-point estimate; terrain and hazards are not automatically routed';
     document.getElementById('o2Val').innerText = o2Remaining;
     document.getElementById('battVal').innerText = battRemaining;
 
@@ -840,7 +1171,7 @@ async function loadMissionRoute() {
             <span>⚠️ ${h.name}</span>
             <span>${h.slope_deg}&deg; Slope</span>
           </div>
-          <div class="hazard-item-meta">Type: ${h.type} • Route deflected safely around perimeter</div>
+          <div class="hazard-item-meta">Type: ${h.type} • ${usesSavedRoute ? 'Saved mission route advisory' : 'Nearby hazard; custom route is not automatically checked'}</div>
         </div>
       `).join('');
 
@@ -866,13 +1197,13 @@ async function loadMissionRoute() {
         weight: 2,
         dashArray: '4, 4',
         radius: h.radius_meters || 600
-      }).bindPopup(`
+      }).on('click', (event) => selectCustomMapPoint(event.latlng)).bindPopup(`
         <div style="font-family:'Inter',sans-serif; min-width:190px;">
           <div style="color:#f87171; font-weight:700; font-size:0.85rem; margin-bottom:4px;">⚠️ HAZARD ZONE: ${h.name}</div>
           <div style="font-size:0.78rem; color:#e2e8f0;">
             <b>Type:</b> ${h.type}<br>
             <b>Slope Gradient:</b> ${h.slope_deg}&deg;<br>
-            <span style="color:#94a3b8;">Navigation path deflected to prevent suit/rover entrapment.</span>
+            <span style="color:#94a3b8;">${usesSavedRoute ? 'Saved mission route is planned around terrain hazards.' : 'Direct custom routes are not checked or rerouted around terrain hazards.'}</span>
           </div>
         </div>
       `);
@@ -896,7 +1227,7 @@ async function loadMissionRoute() {
       opacity: 1,
       lineCap: 'round',
       lineJoin: 'round'
-    });
+    }).on('click', (event) => selectCustomMapPoint(event.latlng));
     currentRouteLine = routeLine;
     routeLayerGroup.addLayer(routeGlow);
     routeLayerGroup.addLayer(routeLine);
@@ -915,7 +1246,7 @@ async function loadMissionRoute() {
             <div style="font-weight:700; color:#60a5fa; margin-bottom:3px;">ORIGIN: ${departure.name}</div>
             <div style="font-size:0.78rem; color:#cbd5e1;">Selected departure point • EVA route begins here</div>
           </div>
-        `);
+        `).on('click', (event) => selectCustomMapPoint(event.latlng));
         poiLayerGroup.addLayer(startMarker);
       } else if (idx === waypoints.length - 1) {
         const endIcon = L.divIcon({
@@ -929,7 +1260,7 @@ async function loadMissionRoute() {
             <div style="font-weight:700; color:#f87171; margin-bottom:3px;">ARRIVAL: ${arrival.name}</div>
             <div style="font-size:0.78rem; color:#cbd5e1;">${arrival.id === 'target' ? details?.unstudied_poi?.scientific_objective || 'High Priority EVA Objective' : 'Selected EVA route waypoint'}</div>
           </div>
-        `);
+        `).on('click', (event) => selectCustomMapPoint(event.latlng));
         poiLayerGroup.addLayer(endMarker);
       } else {
         const wpIcon = L.divIcon({
@@ -942,7 +1273,7 @@ async function loadMissionRoute() {
           <div style="font-family:'Inter',sans-serif; font-size:0.78rem;">
             <b>Waypoint ${idx + 1}</b><br>Lat: ${coord[0].toFixed(4)}°, Lon: ${coord[1].toFixed(4)}°
           </div>
-        `);
+        `).on('click', (event) => selectCustomMapPoint(event.latlng));
         poiLayerGroup.addLayer(wpMarker);
       }
     });
@@ -1045,11 +1376,27 @@ function startNavigationSimulation() {
 
 // UI Event Listeners
 document.getElementById('loadBtn').addEventListener('click', loadMissionRoute);
-document.getElementById('siteSelect').addEventListener('change', loadMissionRoute);
+document.getElementById('siteSelect').addEventListener('change', () => {
+  cancelMapPointSelection();
+  loadMissionRoute();
+});
 
 function handleEndpointSelectionChange(changedId, otherId) {
   const changedSelect = document.getElementById(changedId);
   const otherSelect = document.getElementById(otherId);
+  const endpoint = changedId === 'departureSelect' ? 'departure' : 'arrival';
+  cancelMapPointSelection();
+
+  if (currentSiteDetails) {
+    const selectedLocation = getRouteLocations(currentSiteDetails)
+      .find((location) => location.id === changedSelect.value);
+    selectedNASAEndpointLocations[endpoint] = selectedLocation?.place || null;
+    customEndpointLocations[endpoint] = selectedLocation?.custom
+      ? selectedLocation
+      : null;
+    populateRouteSelectors(currentSiteDetails);
+  }
+
   if (changedSelect.value === otherSelect.value) {
     const alternative = Array.from(otherSelect.options).find((option) => option.value !== changedSelect.value);
     if (alternative) otherSelect.value = alternative.value;
@@ -1062,6 +1409,23 @@ document.getElementById('departureSelect').addEventListener('change', () => {
 });
 document.getElementById('arrivalSelect').addEventListener('change', () => {
   handleEndpointSelectionChange('arrivalSelect', 'departureSelect');
+});
+
+document.getElementById('pickDepartureBtn').addEventListener('click', () => {
+  beginMapPointSelection(mapPickMode === 'departure' ? null : 'departure');
+});
+document.getElementById('pickArrivalBtn').addEventListener('click', () => {
+  beginMapPointSelection(mapPickMode === 'arrival' ? null : 'arrival');
+});
+document.getElementById('departureCoordinateForm').addEventListener('submit', (event) => {
+  handleCoordinateFormSubmit(event, 'departure');
+});
+document.getElementById('arrivalCoordinateForm').addEventListener('submit', (event) => {
+  handleCoordinateFormSubmit(event, 'arrival');
+});
+map.on('click', (event) => selectCustomMapPoint(event.latlng));
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') cancelMapPointSelection();
 });
 
 const startNavBtn = document.getElementById('startNavBtn');

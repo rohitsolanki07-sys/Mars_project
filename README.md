@@ -55,8 +55,14 @@ Run the backend tests with `npm test`.
 - `GET /api/mission/:site` returns mission data for a site.
 - `GET /api/route/:site` returns route waypoints and estimated mission telemetry.
 - `GET /api/places?bbox=west,south,east,north` returns NASA Mars Trek place names for a map area.
+- `GET /api/elevation?points=latitude,longitude` returns MOLA elevation samples for custom coordinates.
 
 Supported site keys are `jezero_crater` and `mount_sharp`.
+
+The departure and arrival menus include saved mission waypoints and NASA place
+names returned for the current map area. Use **Pick start on map** or **Pick
+destination on map** to choose custom coordinates. Custom routes are straight
+point-to-point estimates; terrain and hazards are not automatically routed.
 
 ## Notes
 

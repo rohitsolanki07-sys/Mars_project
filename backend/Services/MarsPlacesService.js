@@ -1,5 +1,9 @@
 const NASA_MARS_ARCGIS =
   'https://trek.nasa.gov/mars/trekarcgis/rest/services';
+const NASA_MOLA_IMAGE_SERVER =
+  `${NASA_MARS_ARCGIS}/Mars_MOLA_blend200ppx_HRSC_DEM_clon0dd_200mpp_lzw/ImageServer`;
+const MIN_MOLA_ELEVATION_M = -8528;
+const MAX_MOLA_ELEVATION_M = 21230;
 
 const PLACE_LAYERS = [
   {
@@ -141,6 +145,88 @@ async function queryLayer(layer, bounds) {
     .filter(Boolean);
 }
 
+async function getMarsElevations(points) {
+  if (
+    !Array.isArray(points) ||
+    points.some(
+      (point) =>
+        !point ||
+        !Number.isFinite(point.latitude) ||
+        !Number.isFinite(point.longitude) ||
+        point.latitude < -90 ||
+        point.latitude > 90 ||
+        point.longitude < -180 ||
+        point.longitude > 180
+    )
+  ) {
+    throw new TypeError('Elevation points must contain valid latitude and longitude values.');
+  }
+
+  const elevations = new Array(points.length).fill(null);
+  const batchSize = 100;
+  const batches = [];
+  for (let start = 0; start < points.length; start += batchSize) {
+    batches.push({ start, points: points.slice(start, start + batchSize) });
+  }
+
+  let nextBatch = 0;
+  async function sampleNextBatch() {
+    while (nextBatch < batches.length) {
+      const { start, points: batch } = batches[nextBatch];
+      nextBatch += 1;
+      const url = new URL(`${NASA_MOLA_IMAGE_SERVER}/getSamples`);
+      url.search = new URLSearchParams({
+        geometry: JSON.stringify({
+          points: batch.map((point) => [point.longitude, point.latitude]),
+          spatialReference: { wkid: 104905 }
+        }),
+        geometryType: 'esriGeometryMultipoint',
+        returnFirstValueOnly: 'true',
+        interpolation: 'RSP_NearestNeighbor',
+        f: 'json'
+      }).toString();
+
+      const response = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(10000)
+      });
+      if (!response.ok) {
+        throw new Error(`NASA MOLA elevation service returned HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+      if (result.error) {
+        throw new Error(
+          `NASA MOLA elevation service: ${result.error.message || 'sampling failed'}`
+        );
+      }
+
+      for (const sample of result.samples || []) {
+        const sampleIndex = Number(sample.locationId);
+        const elevationM = Number(sample.value);
+        if (
+          Number.isInteger(sampleIndex) &&
+          sampleIndex >= 0 &&
+          sampleIndex < batch.length &&
+          Number.isFinite(elevationM) &&
+          elevationM >= MIN_MOLA_ELEVATION_M &&
+          elevationM <= MAX_MOLA_ELEVATION_M
+        ) {
+          elevations[start + sampleIndex] = elevationM;
+        }
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(4, batches.length) },
+      () => sampleNextBatch()
+    )
+  );
+  return elevations;
+}
+
 async function getMarsPlaces(bounds) {
   if (!isValidBounds(bounds)) {
     throw new TypeError('A valid west,south,east,north map area is required.');
@@ -173,7 +259,20 @@ async function getMarsPlaces(bounds) {
     throw new Error(`All NASA Mars place-name sources failed: ${warnings.join(', ')}`);
   }
 
+  try {
+    const elevations = await getMarsElevations(places);
+    places.forEach((place, index) => {
+      place.elevationM = elevations[index];
+    });
+  } catch (err) {
+    warnings.push('NASA MOLA elevation data');
+    console.error('ERROR loading NASA MOLA elevations:', err.message);
+    places.forEach((place) => {
+      place.elevationM = null;
+    });
+  }
+
   return { places, warnings };
 }
 
-module.exports = { getMarsPlaces, isValidBounds };
+module.exports = { getMarsPlaces, getMarsElevations, isValidBounds };

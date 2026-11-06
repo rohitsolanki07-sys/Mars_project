@@ -100,14 +100,37 @@
           <div class="endpoint-row">
             <label class="endpoint-label" for="departureSelect">FROM</label>
             <select class="endpoint-select" id="departureSelect" aria-label="Select departure location"></select>
+            <button type="button" class="pick-map-btn" id="pickDepartureBtn">Pick start on map</button>
           </div>
           <div class="endpoint-divider"></div>
           <div class="endpoint-row">
             <label class="endpoint-label" for="arrivalSelect">TO</label>
             <select class="endpoint-select" id="arrivalSelect" aria-label="Select arrival location"></select>
+            <button type="button" class="pick-map-btn" id="pickArrivalBtn">Pick destination on map</button>
           </div>
         </div>
       </div>
+      <div id="mapPickStatus" class="map-pick-status" role="status" aria-live="polite"></div>
+      <details class="coordinate-entry">
+        <summary>Enter custom coordinates</summary>
+        <form id="departureCoordinateForm" class="coordinate-form">
+          <strong>Custom starting point</strong>
+          <label for="departureLatitude">Latitude (−90 to 90°)</label>
+          <input id="departureLatitude" name="latitude" type="number" min="-90" max="90" step="any" placeholder="18.4447" required>
+          <label for="departureLongitude">Longitude (−180 to 180°)</label>
+          <input id="departureLongitude" name="longitude" type="number" min="-180" max="180" step="any" placeholder="77.4508" required>
+          <button type="submit" class="pick-map-btn">Use these start coordinates</button>
+        </form>
+        <form id="arrivalCoordinateForm" class="coordinate-form">
+          <strong>Custom destination</strong>
+          <label for="arrivalLatitude">Latitude (−90 to 90°)</label>
+          <input id="arrivalLatitude" name="latitude" type="number" min="-90" max="90" step="any" placeholder="18.5200" required>
+          <label for="arrivalLongitude">Longitude (−180 to 180°)</label>
+          <input id="arrivalLongitude" name="longitude" type="number" min="-180" max="180" step="any" placeholder="77.3500" required>
+          <button type="submit" class="pick-map-btn">Use these destination coordinates</button>
+        </form>
+        <div id="coordinateStatus" class="map-pick-status" role="status" aria-live="polite"></div>
+      </details>
     </div>
 
     <!-- Scrollable Route Summary, Telemetry, Steps & Hazards -->

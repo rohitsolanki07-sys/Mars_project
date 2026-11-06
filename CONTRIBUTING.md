@@ -61,6 +61,13 @@ The optional elevation overlay uses the
 credited in the application to NASA's Mars Global Surveyor Mars Orbiter Laser
 Altimeter (MOLA) elevation data.
 
+Named-place labels and custom coordinate lookups sample elevation values from
+NASA Mars Trek's
+[MOLA/HRSC blended digital elevation model ImageServer](https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_MOLA_blend200ppx_HRSC_DEM_clon0dd_200mpp_lzw/ImageServer).
+The returned raster values are shown in metres. Nearby labels are spaced to
+reduce overlap; denser areas may show fewer map labels than the number of
+places available in the endpoint selectors.
+
 ### Local demonstration mission data
 
 `backend/Data/marsData.json` contains the project's local example landing

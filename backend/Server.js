@@ -198,6 +198,51 @@ app.get('/api/places', async (req, res) => {
   }
 });
 
+// Sample NASA's MOLA elevation raster for custom coordinates entered by the user.
+app.get('/api/elevation', async (req, res) => {
+  const points = String(req.query.points || '')
+    .split(';')
+    .map((pair) => pair.split(',').map(Number))
+    .filter((pair) => pair.length === 2)
+    .map(([latitude, longitude]) => ({ latitude, longitude }));
+
+  if (
+    points.length === 0 ||
+    points.length > 20 ||
+    points.some(
+      (point) =>
+        !Number.isFinite(point.latitude) ||
+        !Number.isFinite(point.longitude) ||
+        point.latitude < -90 ||
+        point.latitude > 90 ||
+        point.longitude < -180 ||
+        point.longitude > 180
+    )
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Provide 1 to 20 valid latitude,longitude coordinate pairs.'
+    });
+  }
+
+  try {
+    const elevations = await marsPlacesService.getMarsElevations(points);
+    return res.json({
+      success: true,
+      elevations: points.map((point, index) => ({
+        ...point,
+        elevation_m: elevations[index]
+      }))
+    });
+  } catch (err) {
+    console.error('ERROR loading NASA MOLA elevations:', err.message);
+    return res.status(502).json({
+      success: false,
+      message: 'NASA MOLA elevation data is temporarily unavailable.'
+    });
+  }
+});
+
 // Make the website available from the same server as the API.
 app.use(express.static(frontendDir));
 app.use('/frontend', express.static(frontendDir));
