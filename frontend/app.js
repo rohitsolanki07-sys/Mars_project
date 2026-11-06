@@ -5,7 +5,7 @@ const map = L.map('map', {
   maxZoom: 9
 }).setView([18.48, 77.42], 8);
 
-L.control.zoom({ position: 'topright' }).addTo(map);
+L.control.zoom({ position: 'bottomright' }).addTo(map);
 
 // 1. NASA Mars Trek Viking MDIM 2.1 global color mosaic
 const MarsTrekImageLayer = L.GridLayer.extend({
@@ -55,35 +55,21 @@ const marsShadedRelief = new MarsTrekImageLayer({
   attribution: '&copy; <a href="https://trek.nasa.gov/mars/" target="_blank" rel="noopener noreferrer">NASA/JPL Mars Trek — Viking MDIM 2.1</a>'
 }).addTo(map);
 
-// 2. ASLI NASA MOLA COLOR ALTITUDE TOPOGRAPHY (PIA02820 Rainbow/Elevation Spectrum)
+// 2. NASA MOLA Color Altitude Topography (PIA02820 Rainbow/Elevation Spectrum)
 const molaElevationOverlay = L.tileLayer('https://cartocdn-gusc.global.ssl.fastly.net/opmbuilder/api/v1/map/named/opm-mars-elevation-v0-1/all/{z}/{x}/{y}.png', {
   maxZoom: 9,
   minZoom: 2,
-  opacity: 0.70,
+  opacity: 0.55,
   attribution: '&copy; NASA MGS MOLA Elevation Dataset'
-});
+}).addTo(map);
 
 // Layer Groups
 const hazardLayerGroup = L.layerGroup().addTo(map);
 const routeLayerGroup = L.layerGroup().addTo(map);
 const poiLayerGroup = L.layerGroup().addTo(map);
 
-// Multi-Layer Toggle Controls (Top Right)
-const baseMaps = {
-  "NASA Mars Trek Viking Mosaic": marsShadedRelief
-};
-
-const overlayMaps = {
-  "NASA MOLA Altitude Relief (PIA02820)": molaElevationOverlay,
-  "Hazard Zones (Slopes >20&deg;)": hazardLayerGroup,
-  "Safe EVA Route Path": routeLayerGroup,
-  "Science Targets & Bases": poiLayerGroup
-};
-
-L.control.layers(baseMaps, overlayMaps, { position: 'topright', collapsed: false }).addTo(map);
-
-// 3. MOLA Scale Legend (Bottom Left)
-const molaLegend = L.control({ position: 'bottomleft' });
+// 3. MOLA Scale Legend (Bottom Right)
+const molaLegend = L.control({ position: 'bottomright' });
 molaLegend.onAdd = function () {
   const div = L.DomUtil.create('div', 'mola-legend');
   div.innerHTML = `
@@ -181,6 +167,14 @@ const FALLBACK_MARS_DATA = {
   }
 };
 
+// State for Google Maps-style navigation & travel modes
+let activeTravelSpeedKmH = 2.2;
+let activeTravelMode = 'suit';
+let currentRouteLine = null;
+let currentWaypoints = [];
+let navAnimationTimer = null;
+let navMarker = null;
+
 function calculateMarsDistance(coord1, coord2) {
   const R = 3389.5;
   const dLat = (coord2[0] - coord1[0]) * (Math.PI / 180);
@@ -193,23 +187,36 @@ function calculateMarsDistance(coord1, coord2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function calculateBearingCardinal(coord1, coord2) {
+  const dLat = coord2[0] - coord1[0];
+  const dLon = coord2[1] - coord1[1];
+  const angle = (Math.atan2(dLon, dLat) * 180) / Math.PI;
+  const deg = (angle + 360) % 360;
+  const dirs = ['North', 'Northeast', 'East', 'Southeast', 'South', 'Southwest', 'West', 'Northwest'];
+  return dirs[Math.round(deg / 45) % 8];
+}
+
 function buildPlanFromSiteData(siteData) {
   const waypoints = siteData.safe_route || [];
   let dist = 0;
   for (let i = 0; i < waypoints.length - 1; i++) {
     dist += calculateMarsDistance(waypoints[i], waypoints[i + 1]);
   }
-  const walkHours = dist / 2.2;
-  const totalHours = walkHours + 1.5;
+  const walkHours = dist / activeTravelSpeedKmH;
+  const scienceTime = activeTravelMode === 'drone' ? 0.25 : 1.5;
+  const totalHours = walkHours + scienceTime;
+  const o2Rate = activeTravelMode === 'suit' ? 6.5 : activeTravelMode === 'rover' ? 3.2 : 0;
+  const battRate = activeTravelMode === 'suit' ? 8.0 : activeTravelMode === 'rover' ? 11.5 : 18.0;
 
   return {
     mission_status: "GO_FOR_EVA",
     total_distance_km: Number(dist.toFixed(2)),
     total_duration_hours: Number(totalHours.toFixed(2)),
     waypoints: waypoints,
-    o2_consumed_pct: Math.min(100, Math.round(totalHours * 6.5)),
-    battery_consumed_pct: Math.min(100, Math.round(totalHours * 8.0)),
-    hazards_avoided: siteData.hazards || []
+    o2_consumed_pct: Math.min(100, Math.round(totalHours * o2Rate)),
+    battery_consumed_pct: Math.min(100, Math.round(totalHours * battRate)),
+    hazards_avoided: siteData.hazards || [],
+    site_details: siteData
   };
 }
 
@@ -247,6 +254,7 @@ function connectLiveReload() {
 // Fetch route from current dynamic port (Express API -> static marsData.json -> built-in dataset)
 async function getMissionPlan(site) {
   const key = site.toLowerCase();
+  const siteMetadata = FALLBACK_MARS_DATA[key] || null;
 
   // 1. Try same-origin API on whatever port the user's PC is currently running
   if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
@@ -256,7 +264,13 @@ async function getMissionPlan(site) {
         const json = await apiRes.json();
         if (json && json.success && json.plan) {
           connectLiveReload();
-          return json.plan;
+          const plan = json.plan;
+          plan.site_details = siteMetadata;
+          // Adjust if user switched to Rover or Scout mode
+          if (activeTravelMode !== 'suit' && siteMetadata) {
+            return buildPlanFromSiteData(siteMetadata);
+          }
+          return plan;
         }
       }
     } catch (_) {
@@ -279,92 +293,395 @@ async function getMissionPlan(site) {
   }
 
   // 3. Always succeed using built-in dataset (works even on file:// or isolated frontend server)
-  if (FALLBACK_MARS_DATA[key]) {
-    return buildPlanFromSiteData(FALLBACK_MARS_DATA[key]);
+  if (siteMetadata) {
+    return buildPlanFromSiteData(siteMetadata);
   }
 
   throw new Error(`Unknown mission site: ${site}`);
 }
 
+function renderTurnByTurnSteps(waypoints, siteDetails) {
+  const stepsBox = document.getElementById('stepsList');
+  if (!stepsBox || !waypoints || waypoints.length === 0) return;
+
+  const baseName = siteDetails?.base_habitat?.name || 'Habitat Base';
+  const targetName = siteDetails?.unstudied_poi?.name || 'Science Target POI';
+
+  const itemsHtml = waypoints.map((coord, idx) => {
+    if (idx === 0) {
+      return `
+        <div class="step-item" data-step-index="${idx}">
+          <div class="step-icon">🏠</div>
+          <div class="step-details">
+            <div class="step-title">Depart ${baseName}</div>
+            <div class="step-meta">${coord[0].toFixed(4)}° N, ${coord[1].toFixed(4)}° E</div>
+          </div>
+        </div>
+      `;
+    }
+    const prev = waypoints[idx - 1];
+    const segDist = calculateMarsDistance(prev, coord).toFixed(2);
+    const dir = calculateBearingCardinal(prev, coord);
+    const isLast = idx === waypoints.length - 1;
+
+    return `
+      <div class="step-item" data-step-index="${idx}">
+        <div class="step-icon">${isLast ? '🏁' : '↗️'}</div>
+        <div class="step-details">
+          <div class="step-title">${isLast ? `Arrive at ${targetName}` : `Head ${dir} to Waypoint ${idx + 1}`}</div>
+          <div class="step-meta">${segDist} km • [${coord[0].toFixed(4)}°, ${coord[1].toFixed(4)}°]</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  stepsBox.innerHTML = itemsHtml;
+
+  stepsBox.querySelectorAll('.step-item').forEach((el) => {
+    el.addEventListener('click', () => {
+      const i = Number(el.getAttribute('data-step-index'));
+      if (waypoints[i]) {
+        map.flyTo(waypoints[i], 9, { duration: 0.8 });
+      }
+    });
+  });
+}
+
 // Route Loader & Telemetry
 async function loadMissionRoute() {
+  stopNavigationSimulation();
   const site = document.getElementById('siteSelect').value;
   try {
     const plan = await getMissionPlan(site);
+    const details = plan.site_details || FALLBACK_MARS_DATA[site.toLowerCase()];
 
     hazardLayerGroup.clearLayers();
     routeLayerGroup.clearLayers();
     poiLayerGroup.clearLayers();
 
+    const o2Remaining = 100 - plan.o2_consumed_pct;
+    const battRemaining = 100 - plan.battery_consumed_pct;
+
     // Update Telemetry Panel
     document.getElementById('missionStatus').innerText = plan.mission_status;
     document.getElementById('distVal').innerText = plan.total_distance_km;
     document.getElementById('timeVal').innerText = plan.total_duration_hours;
-    document.getElementById('o2Val').innerText = 100 - plan.o2_consumed_pct;
-    document.getElementById('battVal').innerText = 100 - plan.battery_consumed_pct;
+    document.getElementById('o2Val').innerText = o2Remaining;
+    document.getElementById('battVal').innerText = battRemaining;
 
-    // Sidebar Hazards
-    const hazardBox = document.getElementById('hazardList');
-    if (plan.hazards_avoided && plan.hazards_avoided.length > 0) {
-      hazardBox.innerHTML = plan.hazards_avoided.map(h => 
-        `<div>⚠️ <b>${h.name}</b><br>Type: ${h.type} | Slope: ${h.slope_deg}&deg;</div>`
-      ).join('<hr style="border:0.5px solid #ff3860; margin:6px 0;">');
+    // Update Progress Bars & Endpoints
+    const o2Bar = document.getElementById('o2Bar');
+    const battBar = document.getElementById('battBar');
+    if (o2Bar) o2Bar.style.width = `${o2Remaining}%`;
+    if (battBar) battBar.style.width = `${battRemaining}%`;
+
+    if (details) {
+      const originEl = document.getElementById('originName');
+      const destEl = document.getElementById('destName');
+      if (originEl && details.base_habitat) originEl.innerText = details.base_habitat.name;
+      if (destEl && details.unstudied_poi) destEl.innerText = details.unstudied_poi.name;
+
+      if (details.telemetry) {
+        const tempEl = document.getElementById('tempVal');
+        const pressEl = document.getElementById('pressureVal');
+        const radEl = document.getElementById('radVal');
+        if (tempEl) tempEl.innerText = `${details.telemetry.surface_temp_c}°C`;
+        if (pressEl) pressEl.innerText = `${details.telemetry.atmospheric_pressure_pa} Pa`;
+        if (radEl) radEl.innerText = `${details.telemetry.radiation_rate_msv_day} mSv/d`;
+      }
     }
 
-    // 1. Hazards
+    // Sidebar Hazards (Google Maps Traffic Advisory Cards)
+    const hazardBox = document.getElementById('hazardList');
+    if (plan.hazards_avoided && plan.hazards_avoided.length > 0) {
+      hazardBox.innerHTML = plan.hazards_avoided.map((h, i) => `
+        <div class="hazard-item" data-hazard-index="${i}">
+          <div class="hazard-item-header">
+            <span>⚠️ ${h.name}</span>
+            <span>${h.slope_deg}&deg; Slope</span>
+          </div>
+          <div class="hazard-item-meta">Type: ${h.type} • Route deflected safely around perimeter</div>
+        </div>
+      `).join('');
+
+      hazardBox.querySelectorAll('.hazard-item').forEach((item) => {
+        item.addEventListener('click', () => {
+          const idx = Number(item.getAttribute('data-hazard-index'));
+          const h = plan.hazards_avoided[idx];
+          if (h && h.coords) {
+            map.flyTo(h.coords, 9, { duration: 0.8 });
+          }
+        });
+      });
+    } else {
+      hazardBox.innerHTML = 'No active hazards on this route.';
+    }
+
+    // 1. Hazards on Map
     plan.hazards_avoided.forEach(h => {
       const hazardCircle = L.circle(h.coords, {
-        color: '#ff3860',
-        fillColor: '#ff3860',
-        fillOpacity: 0.45,
+        color: '#ea4335',
+        fillColor: '#ea4335',
+        fillOpacity: 0.35,
         weight: 2,
+        dashArray: '4, 4',
         radius: h.radius_meters || 600
       }).bindPopup(`
-        <div style="color:#000; font-family:sans-serif;">
-          <h4 style="color:#d9534f; margin:0 0 4px;">DANGER ZONE: ${h.name}</h4>
-          <b>Type:</b> ${h.type}<br>
-          <b>Slope Gradient:</b> ${h.slope_deg}&deg;<br>
-          <i>Path deflected to avoid rover/suit wheel entrapment.</i>
+        <div style="font-family:'Inter',sans-serif; min-width:190px;">
+          <div style="color:#f87171; font-weight:700; font-size:0.85rem; margin-bottom:4px;">⚠️ HAZARD ZONE: ${h.name}</div>
+          <div style="font-size:0.78rem; color:#e2e8f0;">
+            <b>Type:</b> ${h.type}<br>
+            <b>Slope Gradient:</b> ${h.slope_deg}&deg;<br>
+            <span style="color:#94a3b8;">Navigation path deflected to prevent suit/rover entrapment.</span>
+          </div>
         </div>
       `);
       hazardLayerGroup.addLayer(hazardCircle);
     });
 
-    // 2. Safe EVA Path
+    // 2. Google Maps-Style Dual-Casing Route Polyline
     const waypoints = plan.waypoints;
-    const routeLine = L.polyline(waypoints, {
-      color: '#38ef7d',
-      weight: 4,
-      dashArray: '8, 8'
+    currentWaypoints = waypoints;
+
+    // Outer dark blue casing + glowing inner Google Maps blue line
+    const routeGlow = L.polyline(waypoints, {
+      color: '#1d4ed8',
+      weight: 10,
+      opacity: 0.45,
+      lineCap: 'round',
+      lineJoin: 'round'
     });
+    const routeLine = L.polyline(waypoints, {
+      color: '#60a5fa',
+      weight: 5,
+      opacity: 1,
+      lineCap: 'round',
+      lineJoin: 'round'
+    });
+    currentRouteLine = routeLine;
+    routeLayerGroup.addLayer(routeGlow);
     routeLayerGroup.addLayer(routeLine);
 
-    // 3. Markers
-    const startMarker = L.marker(waypoints[0]).bindPopup(`
-      <div style="color:#000; font-family:sans-serif;">
-        <h4 style="margin:0 0 4px; color:#2e7d32;">HABITAT BASE (START)</h4>
-        <b>Status:</b> Safe Departure Point<br>
-        <b>Life Support:</b> 100% Nominal
-      </div>
-    `);
-    poiLayerGroup.addLayer(startMarker);
+    // 3. Google Maps-Style Custom Markers (Origin A, Intermediate Waypoints, Destination B)
+    waypoints.forEach((coord, idx) => {
+      if (idx === 0) {
+        const startIcon = L.divIcon({
+          className: '',
+          html: `<div class="gmap-pin gmap-pin-start">A</div>`,
+          iconSize: [28, 28],
+          iconAnchor: [14, 14]
+        });
+        const startMarker = L.marker(coord, { icon: startIcon }).bindPopup(`
+          <div style="font-family:'Inter',sans-serif;">
+            <div style="font-weight:700; color:#60a5fa; margin-bottom:3px;">ORIGIN: ${details?.base_habitat?.name || 'HABITAT BASE'}</div>
+            <div style="font-size:0.78rem; color:#cbd5e1;">Safe Departure Point • Life Support 100% Nominal</div>
+          </div>
+        `);
+        poiLayerGroup.addLayer(startMarker);
+      } else if (idx === waypoints.length - 1) {
+        const endIcon = L.divIcon({
+          className: '',
+          html: `<div class="gmap-pin gmap-pin-end">B</div>`,
+          iconSize: [32, 32],
+          iconAnchor: [16, 16]
+        });
+        const endMarker = L.marker(coord, { icon: endIcon }).bindPopup(`
+          <div style="font-family:'Inter',sans-serif;">
+            <div style="font-weight:700; color:#f87171; margin-bottom:3px;">TARGET: ${details?.unstudied_poi?.name || 'SCIENCE POI'}</div>
+            <div style="font-size:0.78rem; color:#cbd5e1;">${details?.unstudied_poi?.scientific_objective || 'High Priority EVA Objective'}</div>
+          </div>
+        `);
+        poiLayerGroup.addLayer(endMarker);
+      } else {
+        const wpIcon = L.divIcon({
+          className: '',
+          html: `<div class="gmap-pin gmap-pin-waypoint">${idx + 1}</div>`,
+          iconSize: [22, 22],
+          iconAnchor: [11, 11]
+        });
+        const wpMarker = L.marker(coord, { icon: wpIcon }).bindPopup(`
+          <div style="font-family:'Inter',sans-serif; font-size:0.78rem;">
+            <b>Waypoint ${idx + 1}</b><br>Lat: ${coord[0].toFixed(4)}°, Lon: ${coord[1].toFixed(4)}°
+          </div>
+        `);
+        poiLayerGroup.addLayer(wpMarker);
+      }
+    });
 
-    const endMarker = L.marker(waypoints[waypoints.length - 1]).bindPopup(`
-      <div style="color:#000; font-family:sans-serif;">
-        <h4 style="margin:0 0 4px; color:#1565c0;">UNSTUDIED SCIENCE POI</h4>
-        <b>Mission Target:</b> Ancient Bedrock Core<br>
-        <b>Status:</b> High Priority EVA Objective
-      </div>
-    `);
-    poiLayerGroup.addLayer(endMarker);
-
-    map.fitBounds(routeLine.getBounds(), { padding: [60, 60] });
+    renderTurnByTurnSteps(waypoints, details);
+    map.fitBounds(routeLine.getBounds(), { paddingTopLeft: [420, 60], paddingBottomRight: [60, 60] });
 
   } catch (err) {
     console.error(err);
   }
 }
 
+// Live Turn-by-Turn EVA Navigation Simulation (Google Maps "Start" Mode)
+function stopNavigationSimulation() {
+  if (navAnimationTimer) {
+    clearInterval(navAnimationTimer);
+    navAnimationTimer = null;
+  }
+  if (navMarker) {
+    poiLayerGroup.removeLayer(navMarker);
+    navMarker = null;
+  }
+  const banner = document.getElementById('navBanner');
+  if (banner) banner.classList.add('hidden');
+  const startBtn = document.getElementById('startNavBtn');
+  if (startBtn) {
+    startBtn.classList.remove('active');
+    startBtn.innerHTML = '<span>▶</span> Start EVA Navigation';
+  }
+}
+
+function startNavigationSimulation() {
+  if (navAnimationTimer) {
+    stopNavigationSimulation();
+    return;
+  }
+  if (!currentWaypoints || currentWaypoints.length < 2) return;
+
+  const banner = document.getElementById('navBanner');
+  const navInstruction = document.getElementById('navInstruction');
+  const navSubtext = document.getElementById('navSubtext');
+  const startBtn = document.getElementById('startNavBtn');
+
+  if (banner) banner.classList.remove('hidden');
+  if (startBtn) {
+    startBtn.classList.add('active');
+    startBtn.innerHTML = '<span>⏹</span> Stop Navigation';
+  }
+
+  const modeEmoji = activeTravelMode === 'rover' ? '🛞' : activeTravelMode === 'drone' ? '🚁' : '🧑‍🚀';
+  const navIcon = L.divIcon({
+    className: '',
+    html: `<div class="gmap-astronaut-nav">${modeEmoji}</div>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17]
+  });
+
+  navMarker = L.marker(currentWaypoints[0], { icon: navIcon, zIndexOffset: 1000 });
+  poiLayerGroup.addLayer(navMarker);
+
+  // Build interpolated points across segments
+  const interpolated = [];
+  for (let i = 0; i < currentWaypoints.length - 1; i++) {
+    const start = currentWaypoints[i];
+    const end = currentWaypoints[i + 1];
+    const dir = calculateBearingCardinal(start, end);
+    const segDist = calculateMarsDistance(start, end).toFixed(2);
+    const steps = 25;
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      interpolated.push({
+        coord: [start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t],
+        segmentIndex: i + 1,
+        dir,
+        segDist
+      });
+    }
+  }
+
+  let tick = 0;
+  navAnimationTimer = setInterval(() => {
+    if (tick >= interpolated.length) {
+      if (navInstruction) navInstruction.innerText = 'Arrived at Science Target POI';
+      if (navSubtext) navSubtext.innerText = 'EVA Navigation Complete • Ready for surface sampling';
+      clearInterval(navAnimationTimer);
+      navAnimationTimer = null;
+      return;
+    }
+    const pt = interpolated[tick];
+    navMarker.setLatLng(pt.coord);
+    if (navInstruction) {
+      navInstruction.innerText = `Proceed ${pt.dir} toward Waypoint ${pt.segmentIndex + 1}`;
+    }
+    if (navSubtext) {
+      navSubtext.innerText = `Segment distance: ${pt.segDist} km • Lat ${pt.coord[0].toFixed(4)}°, Lon ${pt.coord[1].toFixed(4)}°`;
+    }
+    tick++;
+  }, 120);
+}
+
+// UI Event Listeners
 document.getElementById('loadBtn').addEventListener('click', loadMissionRoute);
 document.getElementById('siteSelect').addEventListener('change', loadMissionRoute);
+
+const startNavBtn = document.getElementById('startNavBtn');
+if (startNavBtn) startNavBtn.addEventListener('click', startNavigationSimulation);
+
+const stopNavBtn = document.getElementById('stopNavBtn');
+if (stopNavBtn) stopNavBtn.addEventListener('click', stopNavigationSimulation);
+
+const recenterBtn = document.getElementById('recenterBtn');
+if (recenterBtn) {
+  recenterBtn.addEventListener('click', () => {
+    if (currentRouteLine) {
+      map.fitBounds(currentRouteLine.getBounds(), {
+        paddingTopLeft: [420, 60],
+        paddingBottomRight: [60, 60]
+      });
+    }
+  });
+}
+
+// Travel Mode Tabs (Suit / Rover / Scout)
+document.querySelectorAll('.mode-tab').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.mode-tab').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeTravelMode = btn.getAttribute('data-mode') || 'suit';
+    activeTravelSpeedKmH = Number(btn.getAttribute('data-speed')) || 2.2;
+    loadMissionRoute();
+  });
+});
+
+// Top-Right Quick Layer Pills
+const toggleMolaBtn = document.getElementById('toggleMolaBtn');
+if (toggleMolaBtn) {
+  toggleMolaBtn.addEventListener('click', () => {
+    if (map.hasLayer(molaElevationOverlay)) {
+      map.removeLayer(molaElevationOverlay);
+      toggleMolaBtn.classList.remove('active');
+    } else {
+      map.addLayer(molaElevationOverlay);
+      toggleMolaBtn.classList.add('active');
+    }
+  });
+}
+
+const toggleHazardsBtn = document.getElementById('toggleHazardsBtn');
+if (toggleHazardsBtn) {
+  toggleHazardsBtn.addEventListener('click', () => {
+    if (map.hasLayer(hazardLayerGroup)) {
+      map.removeLayer(hazardLayerGroup);
+      toggleHazardsBtn.classList.remove('active');
+    } else {
+      map.addLayer(hazardLayerGroup);
+      toggleHazardsBtn.classList.add('active');
+    }
+  });
+}
+
+// Collapsible Sidebar Drawer Toggle
+const sidebarToggle = document.getElementById('sidebarToggle');
+const navSidebar = document.getElementById('navSidebar');
+if (sidebarToggle && navSidebar) {
+  sidebarToggle.addEventListener('click', () => {
+    navSidebar.classList.toggle('collapsed');
+    sidebarToggle.innerText = navSidebar.classList.contains('collapsed') ? '▶' : '◀';
+  });
+}
+
+// Live Cursor Coordinates Tracker
+const cursorCoords = document.getElementById('cursorCoords');
+map.on('mousemove', (e) => {
+  if (cursorCoords) {
+    const ns = e.latlng.lat >= 0 ? 'N' : 'S';
+    const ew = e.latlng.lng >= 0 ? 'E' : 'W';
+    cursorCoords.innerText = `Mars Lat: ${Math.abs(e.latlng.lat).toFixed(4)}° ${ns}, Lon: ${Math.abs(e.latlng.lng).toFixed(4)}° ${ew}`;
+  }
+});
+
 loadMissionRoute();

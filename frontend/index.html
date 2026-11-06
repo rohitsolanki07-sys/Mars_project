@@ -3,60 +3,177 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AresNav - Mars Astronaut EVA Navigator</title>
-  
+  <title>Mars Maps — AresNav EVA Navigation</title>
+
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css">
-  
-  <style>
-    /* Backup ensure: map hamesha height pakde */
-    #map {
-      height: 100% !important;
-      min-height: 500px;
-      width: 100%;
-    }
-  </style>
 </head>
 <body>
-  <!-- HUD Header Bar -->
-  <header class="hud-header">
-    <div class="logo">ARES-NAV <span>// EVA PROTOCOL</span></div>
-    <div class="controls">
-      <label>SELECT SITE:</label>
-      <select id="siteSelect">
-        <option value="jezero_crater">Jezero Crater (Neretva Vallis)</option>
-        <option value="mount_sharp">Mount Sharp (Gale Crater)</option>
-      </select>
-      <button id="loadBtn">LOAD MISSION</button>
+  <!-- Full-Screen Map Canvas -->
+  <div id="map"></div>
+
+  <!-- Top-Center Turn-by-Turn Active Navigation Banner (Google Maps Navigation HUD) -->
+  <div id="navBanner" class="nav-hud-banner hidden">
+    <div class="nav-hud-icon" id="navTurnIcon">⬆️</div>
+    <div class="nav-hud-text">
+      <div class="nav-hud-primary" id="navInstruction">Head Northeast toward Waypoint 2</div>
+      <div class="nav-hud-secondary" id="navSubtext">Next segment: 2.4 km • Avoid Canyon Sand Trap</div>
     </div>
-  </header>
+    <button id="stopNavBtn" class="nav-stop-btn" title="Exit Navigation">Exit</button>
+  </div>
 
-  <!-- Main Container -->
-  <main class="container">
-    <div id="map"></div>
+  <!-- Top-Right Floating Map Layer Pills & Mission Weather Chip -->
+  <div class="floating-top-right">
+    <div class="env-weather-pill" id="envPill">
+      <span class="weather-dot"></span>
+      <span id="tempVal">-58°C</span>
+      <span class="divider">|</span>
+      <span id="pressureVal">820 Pa</span>
+      <span class="divider">|</span>
+      <span id="radVal">0.21 mSv/d</span>
+    </div>
+    <div class="layer-pills">
+      <button class="layer-pill active" id="toggleMolaBtn" title="Toggle NASA MOLA Elevation Overlay">
+        🌈 MOLA Elevation
+      </button>
+      <button class="layer-pill active" id="toggleHazardsBtn" title="Toggle Slope & Boulder Hazards">
+        ⚠️ Hazards
+      </button>
+    </div>
+  </div>
 
-    <!-- Telemetry Panel -->
-    <aside class="telemetry-panel">
-      <h3>MISSION TELEMETRY</h3>
-      <div class="telemetry-card">
-        <p>STATUS: <span id="missionStatus" class="highlight">STANDBY</span></p>
-        <p>TOTAL DISTANCE: <span id="distVal">--</span> km</p>
-        <p>EST. DURATION: <span id="timeVal">--</span> hrs</p>
+  <!-- Left Floating Google Maps Directions & Telemetry Panel -->
+  <aside class="nav-sidebar" id="navSidebar">
+    <!-- Brand & Site Search Header -->
+    <div class="nav-sidebar-header">
+      <div class="brand-row">
+        <div class="brand-logo">
+          <span class="brand-pin">📍</span>
+          <div>
+            <h1>Mars Maps</h1>
+            <span class="brand-subtitle">NASA Mars Trek // EVA Route Planner</span>
+          </div>
+        </div>
+        <span id="missionStatus" class="status-badge">STANDBY</span>
       </div>
 
-      <h3>SUIT LIFE SUPPORT</h3>
-      <div class="telemetry-card">
-        <p>O2 REMAINING: <span id="o2Val">--</span>%</p>
-        <p>BATTERY POWER: <span id="battVal">--</span>%</p>
+      <!-- Site Selector Search Box -->
+      <div class="search-box-wrapper">
+        <span class="search-icon">🔍</span>
+        <select id="siteSelect" aria-label="Select Mars Landing Site">
+          <option value="jezero_crater">Jezero Crater (Neretva Vallis)</option>
+          <option value="mount_sharp">Mount Sharp (Gale Crater)</option>
+        </select>
+        <button id="loadBtn" class="icon-action-btn" title="Reload Route">↻</button>
       </div>
 
-      <h3>HAZARDS IDENTIFIED</h3>
-      <div id="hazardList" class="hazard-box">
-        No active hazards loaded.
+      <!-- Travel Mode Selector (Google Maps style tabs) -->
+      <div class="travel-modes" role="tablist">
+        <button class="mode-tab active" data-mode="suit" data-speed="2.2">
+          <span>🧑‍🚀</span> Suit Walk
+        </button>
+        <button class="mode-tab" data-mode="rover" data-speed="8.5">
+          <span>🛞</span> Rover
+        </button>
+        <button class="mode-tab" data-mode="drone" data-speed="24.0">
+          <span>🚁</span> Scout
+        </button>
       </div>
-    </aside>
-  </main>
+
+      <!-- Origin / Destination Route Box -->
+      <div class="route-endpoints">
+        <div class="endpoint-track">
+          <span class="dot origin-dot"></span>
+          <span class="track-line"></span>
+          <span class="dot dest-dot"></span>
+        </div>
+        <div class="endpoint-inputs">
+          <div class="endpoint-row">
+            <span class="endpoint-label">START</span>
+            <div class="endpoint-value" id="originName">Octavia E. Butler Base</div>
+          </div>
+          <div class="endpoint-divider"></div>
+          <div class="endpoint-row">
+            <span class="endpoint-label">TARGET</span>
+            <div class="endpoint-value" id="destName">Upstream Neretva Vallis Canyon</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scrollable Route Summary, Telemetry, Steps & Hazards -->
+    <div class="nav-sidebar-body">
+      <!-- Primary Route ETA Card (Google Maps style) -->
+      <div class="eta-summary-card">
+        <div class="eta-main">
+          <div class="eta-time"><span id="timeVal">--</span> hrs</div>
+          <div class="eta-dist">(<span id="distVal">--</span> km)</div>
+        </div>
+        <div class="eta-meta" id="routeMetaDesc">Fastest safe terrain path avoiding steep scarps</div>
+        <div class="eta-actions">
+          <button id="startNavBtn" class="primary-nav-btn">
+            <span>▶</span> Start EVA Navigation
+          </button>
+          <button id="recenterBtn" class="secondary-nav-btn" title="Fit route to screen">
+            🎯 Overview
+          </button>
+        </div>
+      </div>
+
+      <!-- Suit Life Support Gauges -->
+      <div class="section-block">
+        <div class="section-title">SUIT LIFE SUPPORT & CONSUMABLES</div>
+        <div class="gauges-grid">
+          <div class="gauge-card">
+            <div class="gauge-header">
+              <span>O₂ Remaining</span>
+              <strong><span id="o2Val">--</span>%</strong>
+            </div>
+            <div class="progress-track">
+              <div id="o2Bar" class="progress-fill o2-fill" style="width: 100%;"></div>
+            </div>
+          </div>
+          <div class="gauge-card">
+            <div class="gauge-header">
+              <span>Battery Power</span>
+              <strong><span id="battVal">--</span>%</strong>
+            </div>
+            <div class="progress-track">
+              <div id="battBar" class="progress-fill batt-fill" style="width: 100%;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hazard Advisories -->
+      <div class="section-block">
+        <div class="section-title">TERRAIN HAZARD ADVISORIES</div>
+        <div id="hazardList" class="hazard-box">
+          No active hazards loaded.
+        </div>
+      </div>
+
+      <!-- Turn-by-Turn Waypoint Steps -->
+      <div class="section-block">
+        <div class="section-title">TURN-BY-TURN EVA WAYPOINTS</div>
+        <div id="stepsList" class="steps-list"></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Sidebar Collapse Toggle Button -->
+  <button id="sidebarToggle" class="sidebar-toggle-btn" title="Toggle Navigation Panel">◀</button>
+
+  <!-- Bottom Floating Coordinates & Scale Bar -->
+  <div class="floating-bottom-bar">
+    <span id="cursorCoords">Mars Lat: 18.4800° N, Lon: 77.4200° E</span>
+  </div>
 
   <!-- Leaflet JS & App JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
