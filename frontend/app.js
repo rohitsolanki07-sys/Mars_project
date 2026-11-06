@@ -67,6 +67,33 @@ const molaElevationOverlay = L.tileLayer('https://cartocdn-gusc.global.ssl.fastl
 const hazardLayerGroup = L.layerGroup().addTo(map);
 const routeLayerGroup = L.layerGroup().addTo(map);
 const poiLayerGroup = L.layerGroup().addTo(map);
+const placeNamesLayerGroup = L.layerGroup().addTo(map);
+const NASA_PLACE_LAYERS = [
+  {
+    name: 'Official Mars nomenclature',
+    path: 'outreach_nomenclature/MapServer/0',
+    fields:
+      'clean_name,diameter,category,center_lat,center_lon,type,approvaldt,desc_,link,notes',
+    hasGeometry: true
+  },
+  {
+    name: 'Major surface features',
+    path: 'major_features/MapServer/0',
+    fields: 'name,template,labelNear,labelFar',
+    hasGeometry: true
+  },
+  {
+    name: 'Named regions',
+    path: 'mars_regions/MapServer/0',
+    fields: 'title,lat,lon,level',
+    hasGeometry: false
+  }
+];
+let placeNamesEnabled = true;
+let placeNamesRequest = null;
+let placeNamesRefreshTimer = null;
+let lastPlaceNamesBounds = '';
+const LOCAL_BACKEND_PORTS = ['3000', '5500', '3001', '3002', '5050', '8080'];
 
 // 3. MOLA Scale Legend (Bottom Right)
 const molaLegend = L.control({ position: 'bottomright' });
@@ -265,6 +292,347 @@ function calculateBearingCardinal(coord1, coord2) {
   const deg = (angle + 360) % 360;
   const dirs = ['North', 'Northeast', 'East', 'Southeast', 'South', 'Southwest', 'West', 'Northwest'];
   return dirs[Math.round(deg / 45) % 8];
+}
+
+function buildPlaceQueryUrl(layer, bounds) {
+  const [west, south, east, north] = bounds;
+  const url = new URL(
+    `https://trek.nasa.gov/mars/trekarcgis/rest/services/${layer.path}/query`
+  );
+  url.search = new URLSearchParams({
+    where: '1=1',
+    geometry: JSON.stringify({
+      xmin: west,
+      ymin: south,
+      xmax: east,
+      ymax: north,
+      spatialReference: { wkid: 104905 }
+    }),
+    geometryType: 'esriGeometryEnvelope',
+    inSR: '104905',
+    spatialRel: 'esriSpatialRelIntersects',
+    outFields: layer.fields,
+    returnGeometry: String(layer.hasGeometry),
+    f: 'json'
+  }).toString();
+  return url;
+}
+
+function normalizeNASAPlace(feature, layer) {
+  const attributes = feature.attributes || {};
+  const geometry = feature.geometry || {};
+  const name = String(
+    attributes.clean_name || attributes.name || attributes.title || ''
+  ).trim();
+  const latitude = Number(
+    geometry.y ?? attributes.center_lat ?? attributes.lat
+  );
+  const longitude = Number(
+    geometry.x ?? attributes.center_lon ?? attributes.lon
+  );
+
+  if (
+    !name ||
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return null;
+  }
+
+  const sourceUrl = String(attributes.link || '').trim();
+  const diameterKm = Number(attributes.diameter);
+  return {
+    id: `${layer.path}:${name}:${latitude}:${longitude}`,
+    name,
+    latitude,
+    longitude,
+    featureType: String(
+      attributes.type || attributes.template || attributes.level || ''
+    ).trim(),
+    category: String(attributes.category || '').trim(),
+    sizeKm:
+      Number.isFinite(diameterKm) && diameterKm > 0 ? diameterKm : null,
+    description: String(attributes.desc_ || attributes.template || '')
+      .replace(/&apos;/gi, "'")
+      .replace(/&quot;/gi, '"')
+      .replace(/&amp;/gi, '&')
+      .trim(),
+    notes: String(attributes.notes || '').trim(),
+    approvalDate: String(attributes.approvaldt || '').trim(),
+    sourceUrl: /^https?:\/\/planetarynames\.wr\.usgs\.gov\//i.test(sourceUrl)
+      ? sourceUrl.replace(/^http:/i, 'https:')
+      : '',
+    sourceName: layer.name
+  };
+}
+
+async function fetchNASAPlacesDirectly(bounds, signal) {
+  const results = await Promise.allSettled(
+    NASA_PLACE_LAYERS.map(async (layer) => {
+      const response = await fetch(buildPlaceQueryUrl(layer, bounds), { signal });
+      if (!response.ok) {
+        throw new Error(`${layer.name} returned HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+      if (result.error) {
+        throw new Error(result.error.message || 'NASA place query failed');
+      }
+
+      return (result.features || [])
+        .map((feature) => normalizeNASAPlace(feature, layer))
+        .filter(Boolean);
+    })
+  );
+  const places = [];
+  const warnings = [];
+  const seen = new Set();
+
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      warnings.push(NASA_PLACE_LAYERS[index].name);
+      return;
+    }
+
+    result.value.forEach((place) => {
+      const key = `${place.name.toLowerCase()}:${place.latitude.toFixed(5)}:${place.longitude.toFixed(5)}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        places.push(place);
+      }
+    });
+  });
+
+  if (places.length === 0 && warnings.length === NASA_PLACE_LAYERS.length) {
+    throw new Error(`NASA place-name sources failed: ${warnings.join(', ')}`);
+  }
+
+  return { places, warnings };
+}
+
+async function fetchNASAPlaces(bounds, signal) {
+  const apiUrls = [];
+  const isLocalPage =
+    window.location.protocol === 'file:' ||
+    ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+
+  if (window.location.protocol !== 'file:') {
+    apiUrls.push(new URL('/api/places', window.location.origin));
+  }
+
+  if (isLocalPage) {
+    const host =
+      window.location.protocol === 'file:'
+        ? 'localhost'
+        : window.location.hostname;
+    const ports = new Set([
+      window.location.port,
+      ...LOCAL_BACKEND_PORTS
+    ]);
+    for (const port of ports) {
+      if (port) apiUrls.push(new URL(`/api/places`, `http://${host}:${port}`));
+    }
+  }
+
+  let apiFailure = null;
+  for (const apiUrl of apiUrls) {
+    apiUrl.searchParams.set('bbox', bounds.join(','));
+    try {
+      const response = await fetch(apiUrl, { signal });
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success) return result;
+        apiFailure = new Error(result.message || 'The place-name request failed.');
+      } else {
+        apiFailure = new Error(`Place-name API returned HTTP ${response.status}`);
+      }
+    } catch (error) {
+      if (error.name === 'AbortError') throw error;
+      apiFailure = error;
+    }
+  }
+
+  if (apiFailure) {
+    console.warn('Using NASA Mars Trek directly:', apiFailure.message);
+  }
+  return fetchNASAPlacesDirectly(bounds, signal);
+}
+
+function addPlacePopupRow(container, label, value) {
+  if (!value) return;
+  const row = document.createElement('p');
+  const name = document.createElement('strong');
+  name.textContent = `${label}: `;
+  row.append(name, document.createTextNode(value));
+  container.append(row);
+}
+
+function createPlacePopup(place) {
+  const popup = document.createElement('div');
+  popup.className = 'mars-place-popup';
+  const heading = document.createElement('h3');
+  heading.textContent = place.name;
+  popup.append(heading);
+
+  addPlacePopupRow(popup, 'Feature type', place.featureType);
+  addPlacePopupRow(popup, 'Category', place.category);
+  addPlacePopupRow(
+    popup,
+    'Recorded size',
+    place.sizeKm === null ? '' : `${place.sizeKm.toFixed(2)} km`
+  );
+
+  const latitudeDirection = place.latitude < 0 ? 'S' : 'N';
+  const longitudeDirection = place.longitude < 0 ? 'W' : 'E';
+  addPlacePopupRow(
+    popup,
+    'Coordinates',
+    `${Math.abs(place.latitude).toFixed(4)}° ${latitudeDirection}, ${Math.abs(place.longitude).toFixed(4)}° ${longitudeDirection}`
+  );
+  addPlacePopupRow(popup, 'Description', place.description);
+  addPlacePopupRow(popup, 'Notes', place.notes);
+  addPlacePopupRow(popup, 'Approval date', place.approvalDate);
+
+  const source = document.createElement('p');
+  source.className = 'mars-place-source';
+  source.textContent = `Source: ${place.sourceName} · NASA Mars Trek`;
+  popup.append(source);
+
+  if (place.sourceUrl) {
+    const linkUrl = new URL(place.sourceUrl);
+    if (
+      linkUrl.protocol === 'https:' &&
+      linkUrl.hostname === 'planetarynames.wr.usgs.gov'
+    ) {
+      const link = document.createElement('a');
+      link.href = linkUrl.href;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = 'Open USGS planetary-name record';
+      popup.append(link);
+    }
+  }
+
+  if (!place.description) {
+    addPlacePopupRow(
+      popup,
+      'About this information',
+      'NASA Mars Trek does not provide an additional description for this feature.'
+    );
+  }
+
+  return popup;
+}
+
+function clearPlaceNameLayers() {
+  placeNamesLayerGroup.eachLayer((layer) => {
+    layer.closeTooltip();
+    layer.closePopup();
+    layer.unbindTooltip();
+  });
+  placeNamesLayerGroup.clearLayers();
+  document
+    .querySelectorAll('.leaflet-tooltip.mars-place-tooltip')
+    .forEach((tooltip) => tooltip.remove());
+}
+
+function renderNASAPlaces(places, bounds, warnings) {
+  clearPlaceNameLayers();
+  const currentBounds = L.latLngBounds(
+    [bounds[1], bounds[0]],
+    [bounds[3], bounds[2]]
+  );
+  const visiblePlaces = places.filter((place) =>
+    currentBounds.contains([place.latitude, place.longitude])
+  );
+  const zoom = map.getZoom();
+  const labels =
+    zoom < 4
+      ? visiblePlaces.filter((place) => place.sourceName !== 'Official Mars nomenclature')
+      : visiblePlaces;
+
+  labels.forEach((place) => {
+    const label = document.createElement('span');
+    label.className = 'mars-place-label';
+    label.textContent = place.name;
+
+    L.circleMarker([place.latitude, place.longitude], {
+      radius: place.sourceName === 'Named regions' ? 3 : 4,
+      color: '#f8fafc',
+      weight: 1,
+      fillColor: place.sourceName === 'Named regions' ? '#fbbf24' : '#38bdf8',
+      fillOpacity: 0.95
+    })
+      .bindTooltip(label, {
+        permanent: true,
+        direction: 'right',
+        offset: [6, 0],
+        className: 'mars-place-tooltip'
+      })
+      .bindPopup(createPlacePopup(place), { maxWidth: 320 })
+      .addTo(placeNamesLayerGroup);
+  });
+
+  const status = document.getElementById('placesStatus');
+  if (status) {
+    const countText = `${labels.length} NASA place${labels.length === 1 ? '' : 's'}`;
+    status.textContent =
+      zoom < 4
+        ? `${countText} · zoom in for detailed names`
+        : warnings.length
+        ? `${countText} · some NASA layers unavailable`
+        : countText;
+  }
+}
+
+async function refreshNASAPlaceNames() {
+  if (!placeNamesEnabled) return;
+
+  const bounds = map.getBounds();
+  const safeBounds = [
+    Math.max(-180, bounds.getWest()),
+    Math.max(-90, bounds.getSouth()),
+    Math.min(180, bounds.getEast()),
+    Math.min(90, bounds.getNorth())
+  ].map((value) => Number(value.toFixed(5)));
+  if (safeBounds[0] >= safeBounds[2] || safeBounds[1] >= safeBounds[3]) return;
+
+  const boundsKey = `${map.getZoom()}:${safeBounds.join(',')}`;
+  if (boundsKey === lastPlaceNamesBounds) return;
+  lastPlaceNamesBounds = boundsKey;
+
+  if (placeNamesRequest) placeNamesRequest.abort();
+  placeNamesRequest = new AbortController();
+  const status = document.getElementById('placesStatus');
+  if (status) status.textContent = 'Loading NASA place names...';
+
+  try {
+    const result = await fetchNASAPlaces(safeBounds, placeNamesRequest.signal);
+    if (placeNamesRequest.signal.aborted) return;
+    renderNASAPlaces(result.places || [], safeBounds, result.warnings || []);
+    if ((result.warnings || []).length) {
+      console.warn('Some NASA Mars place-name layers could not be loaded:', result.warnings);
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    lastPlaceNamesBounds = '';
+    if (status) {
+      status.textContent =
+        window.location.protocol === 'file:'
+          ? 'Place names unavailable · open the app with npm start'
+          : 'NASA place names temporarily unavailable';
+    }
+    console.error('Unable to load NASA Mars place names:', error);
+  }
+}
+
+function scheduleNASAPlaceNameRefresh() {
+  clearTimeout(placeNamesRefreshTimer);
+  placeNamesRefreshTimer = setTimeout(refreshNASAPlaceNames, 250);
 }
 
 function buildPlanFromSiteData(siteData, routeWaypoints = siteData.safe_route || []) {
@@ -752,6 +1120,27 @@ if (toggleHazardsBtn) {
   });
 }
 
+const togglePlaceNamesBtn = document.getElementById('togglePlaceNamesBtn');
+if (togglePlaceNamesBtn) {
+  togglePlaceNamesBtn.addEventListener('click', () => {
+    placeNamesEnabled = !placeNamesEnabled;
+    togglePlaceNamesBtn.classList.toggle('active', placeNamesEnabled);
+    togglePlaceNamesBtn.setAttribute('aria-pressed', String(placeNamesEnabled));
+    const status = document.getElementById('placesStatus');
+
+    if (placeNamesEnabled) {
+      placeNamesLayerGroup.addTo(map);
+      lastPlaceNamesBounds = '';
+      scheduleNASAPlaceNameRefresh();
+    } else {
+      if (placeNamesRequest) placeNamesRequest.abort();
+      clearPlaceNameLayers();
+      map.removeLayer(placeNamesLayerGroup);
+      if (status) status.textContent = 'Place names hidden';
+    }
+  });
+}
+
 // Collapsible Sidebar Drawer Toggle
 const sidebarToggle = document.getElementById('sidebarToggle');
 const navSidebar = document.getElementById('navSidebar');
@@ -772,4 +1161,6 @@ map.on('mousemove', (e) => {
   }
 });
 
+map.on('moveend zoomend', scheduleNASAPlaceNameRefresh);
+scheduleNASAPlaceNameRefresh();
 loadMissionRoute();

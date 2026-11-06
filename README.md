@@ -1,6 +1,6 @@
 # Mars Navigator
 
-Mars Navigator is a web application for viewing simulated EVA routes, hazards, and suit telemetry at selected Mars sites. The map uses NASA/JPL Mars Trek's Viking MDIM 2.1 global color mosaic, rendered through its official ArcGIS ImageServer. The API serves mission data from a local JSON file.
+Mars Navigator is a web application for viewing simulated EVA routes, hazards, suit telemetry, and named surface features at selected Mars sites. The map uses NASA/JPL Mars Trek's Viking MDIM 2.1 global color mosaic, rendered through its official ArcGIS ImageServer. Place names and available feature details are loaded from NASA Mars Trek's public map services for the visible area. The API serves mission-planning data from a local JSON file.
 
 ## Project structure
 
@@ -54,9 +54,10 @@ Run the backend tests with `npm test`.
 - `GET /api/health` returns server status and active port.
 - `GET /api/mission/:site` returns mission data for a site.
 - `GET /api/route/:site` returns route waypoints and estimated mission telemetry.
+- `GET /api/places?bbox=west,south,east,north` returns NASA Mars Trek place names for a map area.
 
 Supported site keys are `jezero_crater` and `mount_sharp`.
 
 ## Notes
 
-The route and telemetry data are local demonstration data, not operational guidance. Mars Trek map imagery requires an internet connection. Basemap source: [NASA/JPL Mars Trek](https://trek.nasa.gov/mars/), [Viking MDIM 2.1 global color mosaic service](https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_Viking_MDIM21_ClrMosaic_global_232m/ImageServer).
+The route and telemetry data are local demonstration data, not operational guidance. Mars Trek map imagery and place names require an internet connection. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the project's data, map, and software resources and contribution guidance. Basemap source: [NASA/JPL Mars Trek](https://trek.nasa.gov/mars/), [Viking MDIM 2.1 global color mosaic service](https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_Viking_MDIM21_ClrMosaic_global_232m/ImageServer).

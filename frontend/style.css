@@ -871,6 +871,53 @@ html, body {
   background: #182030 !important;
 }
 
+.mars-place-tooltip {
+  background: rgba(15, 23, 42, 0.9) !important;
+  border: 1px solid rgba(148, 163, 184, 0.55) !important;
+  border-radius: 5px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55) !important;
+  color: #f8fafc !important;
+  font-size: 11px !important;
+  font-weight: 600;
+  padding: 3px 6px !important;
+}
+
+.mars-place-tooltip::before {
+  border-right-color: rgba(15, 23, 42, 0.9) !important;
+}
+
+.mars-place-popup h3 {
+  color: #93c5fd;
+  font-size: 1rem;
+  margin: 0 0 8px;
+}
+
+.mars-place-popup p {
+  line-height: 1.4;
+  margin: 5px 0;
+}
+
+.mars-place-popup .mars-place-source {
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  color: #94a3b8;
+  font-size: 0.72rem;
+  margin-top: 10px;
+  padding-top: 8px;
+}
+
+.mars-place-popup a {
+  color: #93c5fd;
+  font-size: 0.78rem;
+}
+
+.bottom-bar-divider {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+#placesStatus {
+  color: #cbd5e1;
+}
+
 @media (max-width: 768px) {
   .nav-sidebar {
     width: calc(100vw - 32px);
@@ -880,5 +927,13 @@ html, body {
   }
   .sidebar-toggle-btn {
     display: none;
+  }
+
+  .floating-bottom-bar {
+    max-width: calc(100vw - 24px);
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 5px;
+    font-size: 0.64rem;
   }
 }

@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const { exec } = require('child_process');
+const marsPlacesService = require('./Services/MarsPlacesService');
 
 // Create the web server and choose a preferred port. If that port is busy,
 // the server will try the other common development ports listed below.
@@ -168,6 +169,33 @@ app.get('/api/route/:site', (req, res) => {
       hazards_avoided: siteData.hazards || []
     }
   });
+});
+
+// Ask NASA Mars Trek for named features in the visible map area. The browser
+// uses this endpoint to display current place names and their source details.
+app.get('/api/places', async (req, res) => {
+  const bounds = String(req.query.bbox || '')
+    .split(',')
+    .map(Number);
+
+  if (!marsPlacesService.isValidBounds(bounds)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Map bounds must be west,south,east,north coordinates.'
+    });
+  }
+
+  try {
+    const result = await marsPlacesService.getMarsPlaces(bounds);
+    res.set('Cache-Control', 'public, max-age=300');
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('ERROR loading NASA Mars place names:', err.message);
+    return res.status(502).json({
+      success: false,
+      message: 'NASA Mars Trek place names are temporarily unavailable.'
+    });
+  }
 });
 
 // Make the website available from the same server as the API.

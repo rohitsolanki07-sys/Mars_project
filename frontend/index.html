@@ -45,6 +45,9 @@
       <button class="layer-pill active" id="toggleHazardsBtn" title="Toggle Slope & Boulder Hazards">
         ⚠️ Hazards
       </button>
+      <button class="layer-pill active" id="togglePlaceNamesBtn" title="Toggle NASA Mars place names" aria-pressed="true">
+        🏷️ Place Names
+      </button>
     </div>
   </div>
 
@@ -173,6 +176,8 @@
   <!-- Bottom Floating Coordinates & Scale Bar -->
   <div class="floating-bottom-bar">
     <span id="cursorCoords">Mars Lat: 18.4800° N, Lon: 77.4200° E</span>
+    <span class="bottom-bar-divider">|</span>
+    <span id="placesStatus" role="status" aria-live="polite">Loading NASA place names...</span>
   </div>
 
   <!-- Leaflet JS & App JS -->
