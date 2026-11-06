@@ -5,6 +5,8 @@ const cors = require('cors');
 const fs = require('fs');
 const { exec } = require('child_process');
 
+// Create the web server and choose a preferred port. If that port is busy,
+// the server will try the other common development ports listed below.
 const app = express();
 const envPort =
   process.env.PORT !== undefined && process.env.PORT !== ''
@@ -17,7 +19,8 @@ const CANDIDATE_PORTS = Array.from(
 app.use(cors());
 app.use(express.json());
 
-// Distance calculation (Mars radius ≈ 3389.5 km)
+// Find the surface distance between two latitude/longitude points on Mars.
+// The result is an estimate in kilometres, using Mars's average radius.
 function calculateDistance(coord1, coord2) {
   const R = 3389.5;
   const dLat = (coord2[0] - coord1[0]) * (Math.PI / 180);
@@ -30,7 +33,8 @@ function calculateDistance(coord1, coord2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Dynamic data loader so edits to marsData.json apply without restarting
+// Keep the mission information in one JSON file, and reload it when that file
+// changes so edits can appear without restarting the server.
 const dataFilePath = path.join(__dirname, 'Data', 'marsData.json');
 const frontendDir = path.join(__dirname, '..', 'frontend');
 let marsData = {};
@@ -40,13 +44,15 @@ function loadMarsData() {
     marsData = JSON.parse(fs.readFileSync(dataFilePath, 'utf8'));
     console.log('SUCCESS: marsData.json loaded successfully!');
   } catch (err) {
+    // Keep the server running, but report the problem so it is visible.
     console.error('ERROR loading marsData.json:', err.message);
   }
 }
 
 loadMarsData();
 
-// Live-reload SSE clients so frontend and backend stay in sync automatically
+// Browsers connected to this list receive a notice when mission data or
+// frontend files change. This lets the page refresh without manual checking.
 const sseClients = new Set();
 
 function broadcastEvent(type, payload = {}) {
@@ -56,7 +62,8 @@ function broadcastEvent(type, payload = {}) {
   }
 }
 
-// Watch marsData.json and frontend files for live changes
+// Combine several quick file notifications into one reload message, so a
+// single save does not cause repeated reloads.
 let watchDebounce = null;
 function scheduleBroadcast(type) {
   clearTimeout(watchDebounce);
@@ -68,6 +75,7 @@ function scheduleBroadcast(type) {
   }, 120);
 }
 
+// Watch the mission-data folder and reload its data when the JSON file changes.
 try {
   fs.watch(path.dirname(dataFilePath), (eventType, filename) => {
     if (!filename || filename === 'marsData.json') {
@@ -75,9 +83,10 @@ try {
     }
   });
 } catch (_) {
-  // Ignore watch errors on unsupported filesystems
+  // File watching is optional and may not be supported on every computer.
 }
 
+// Also notify connected browsers when a frontend file is edited.
 try {
   fs.watch(frontendDir, (eventType, filename) => {
     if (filename) {
@@ -85,12 +94,13 @@ try {
     }
   });
 } catch (_) {
-  // Ignore watch errors on unsupported filesystems
+  // File watching is optional and may not be supported on every computer.
 }
 
 let activePort = envPort;
 let activeServer = null;
 
+// A simple check used by tools and the frontend to confirm the server is up.
 app.get('/api/health', (req, res) => {
   res.json({
     success: true,
@@ -99,6 +109,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Keep this browser connection open so the server can send live-reload notices.
 app.get('/api/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -113,6 +124,7 @@ app.get('/api/events', (req, res) => {
   });
 });
 
+// Return the saved mission information for a named landing site.
 app.get('/api/mission/:site', (req, res) => {
   const site = req.params.site.toLowerCase();
   if (marsData[site]) {
@@ -121,6 +133,8 @@ app.get('/api/mission/:site', (req, res) => {
   return res.status(404).json({ success: false, message: 'Site not found' });
 });
 
+// Return an estimated distance and suit-resource forecast for a site's
+// saved route. Each pair of neighbouring waypoints makes one route segment.
 app.get('/api/route/:site', (req, res) => {
   const site = req.params.site.toLowerCase();
   const siteData = marsData[site];
@@ -129,12 +143,15 @@ app.get('/api/route/:site', (req, res) => {
     return res.status(404).json({ success: false, message: 'Site not found' });
   }
 
+  // Add the distances of all route segments to get the full route length.
   const waypoints = siteData.safe_route || [];
   let dist = 0;
   for (let i = 0; i < waypoints.length - 1; i++) {
     dist += calculateDistance(waypoints[i], waypoints[i + 1]);
   }
 
+  // Estimate walking time at a fixed average speed, then add time for science
+  // work. These are planning estimates, not live suit readings.
   const walkHours = dist / 2.2;
   const totalHours = walkHours + 1.5;
 
@@ -153,13 +170,17 @@ app.get('/api/route/:site', (req, res) => {
   });
 });
 
+// Make the website available from the same server as the API.
 app.use(express.static(frontendDir));
 app.use('/frontend', express.static(frontendDir));
 
 function openBrowser(url) {
+  // Do not open a window during automated tests or in headless environments.
   if (process.env.NO_OPEN === '1' || process.env.CI === 'true' || process.env.NODE_ENV === 'test') {
     return;
   }
+
+  // Use the operating system's standard command to open the website.
   const platform = process.platform;
   const cmd =
     platform === 'darwin'
@@ -168,6 +189,7 @@ function openBrowser(url) {
       ? `start "" "${url}"`
       : `xdg-open "${url}"`;
 
+  // The browser is a convenience; the server can still be used if opening it fails.
   exec(cmd, () => {});
 }
 
@@ -180,7 +202,7 @@ function startServer(portIndex = 0) {
     const url = `http://localhost:${activePort}`;
     console.log(`Server running at ${url}`);
 
-    // Automatically open the frontend in the browser if no existing tab reconnects within 800ms
+    // Open the page only if a browser has not already connected for live updates.
     setTimeout(() => {
       if (sseClients.size === 0) {
         openBrowser(url);
@@ -190,6 +212,7 @@ function startServer(portIndex = 0) {
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE' && portIndex + 1 < CANDIDATE_PORTS.length) {
+      // Another app is using this port, so try the next available choice.
       console.warn(`Port ${portToTry} is in use, switching to next available port...`);
       startServer(portIndex + 1);
     } else {
@@ -201,6 +224,8 @@ function startServer(portIndex = 0) {
   return server;
 }
 
+// Close browser connections and stop accepting requests when the app is asked
+// to shut down (for example, when the user presses Ctrl+C).
 function shutdown() {
   for (const client of sseClients) {
     client.end();
@@ -213,11 +238,14 @@ function shutdown() {
   }
 }
 
+// Listen for common operating-system shutdown signals.
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
+// Start the server only when this file is run directly, not when imported by a test.
 if (require.main === module) {
   startServer();
 }
 
+// Export these pieces so tests and other backend files can reuse them.
 module.exports = { app, startServer };

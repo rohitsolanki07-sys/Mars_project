@@ -172,8 +172,79 @@ let activeTravelSpeedKmH = 2.2;
 let activeTravelMode = 'suit';
 let currentRouteLine = null;
 let currentWaypoints = [];
+let currentRouteEndpoints = { departure: null, arrival: null };
+let endpointSiteKey = null;
 let navAnimationTimer = null;
 let navMarker = null;
+
+function getRouteLocations(siteData) {
+  const waypoints = siteData.safe_route || [];
+  if (waypoints.length < 2) return [];
+
+  return waypoints.map((coords, index) => {
+    const isDeparture = index === 0;
+    const isArrival = index === waypoints.length - 1;
+    return {
+      id: isDeparture ? 'base' : isArrival ? 'target' : `waypoint-${index + 1}`,
+      name: isDeparture
+        ? siteData.base_habitat?.name || 'Habitat Base'
+        : isArrival
+        ? siteData.unstudied_poi?.name || 'Mission Target'
+        : `Waypoint ${index + 1}`,
+      coords,
+      routeIndex: index
+    };
+  });
+}
+
+function populateRouteSelectors(siteData) {
+  const departureSelect = document.getElementById('departureSelect');
+  const arrivalSelect = document.getElementById('arrivalSelect');
+  const locations = getRouteLocations(siteData);
+  if (!departureSelect || !arrivalSelect || locations.length < 2) return locations;
+
+  const site = document.getElementById('siteSelect').value;
+  const siteChanged = endpointSiteKey !== site;
+  const previousDeparture = departureSelect.value;
+  const previousArrival = arrivalSelect.value;
+  const locationIds = new Set(locations.map((location) => location.id));
+
+  [departureSelect, arrivalSelect].forEach((select) => {
+    select.replaceChildren(...locations.map((location) => {
+      const option = document.createElement('option');
+      option.value = location.id;
+      option.textContent = location.name;
+      return option;
+    }));
+  });
+
+  departureSelect.value = !siteChanged && locationIds.has(previousDeparture)
+    ? previousDeparture
+    : locations[0].id;
+  arrivalSelect.value = !siteChanged && locationIds.has(previousArrival)
+    ? previousArrival
+    : locations[locations.length - 1].id;
+
+  if (departureSelect.value === arrivalSelect.value) {
+    arrivalSelect.value = locations.find((location) => location.id !== departureSelect.value).id;
+  }
+
+  endpointSiteKey = site;
+  return locations;
+}
+
+function getRouteBetweenLocations(siteData, departure, arrival) {
+  const safeRoute = siteData.safe_route || [];
+  const step = departure.routeIndex < arrival.routeIndex ? 1 : -1;
+  const route = [];
+
+  for (let index = departure.routeIndex; ; index += step) {
+    route.push(safeRoute[index]);
+    if (index === arrival.routeIndex) break;
+  }
+
+  return route;
+}
 
 function calculateMarsDistance(coord1, coord2) {
   const R = 3389.5;
@@ -196,8 +267,8 @@ function calculateBearingCardinal(coord1, coord2) {
   return dirs[Math.round(deg / 45) % 8];
 }
 
-function buildPlanFromSiteData(siteData) {
-  const waypoints = siteData.safe_route || [];
+function buildPlanFromSiteData(siteData, routeWaypoints = siteData.safe_route || []) {
+  const waypoints = routeWaypoints;
   let dist = 0;
   for (let i = 0; i < waypoints.length - 1; i++) {
     dist += calculateMarsDistance(waypoints[i], waypoints[i + 1]);
@@ -300,12 +371,12 @@ async function getMissionPlan(site) {
   throw new Error(`Unknown mission site: ${site}`);
 }
 
-function renderTurnByTurnSteps(waypoints, siteDetails) {
+function renderTurnByTurnSteps(waypoints, siteDetails, routeEndpoints) {
   const stepsBox = document.getElementById('stepsList');
   if (!stepsBox || !waypoints || waypoints.length === 0) return;
 
-  const baseName = siteDetails?.base_habitat?.name || 'Habitat Base';
-  const targetName = siteDetails?.unstudied_poi?.name || 'Science Target POI';
+  const baseName = routeEndpoints?.departure?.name || siteDetails?.base_habitat?.name || 'Habitat Base';
+  const targetName = routeEndpoints?.arrival?.name || siteDetails?.unstudied_poi?.name || 'Science Target POI';
 
   const itemsHtml = waypoints.map((coord, idx) => {
     if (idx === 0) {
@@ -352,8 +423,14 @@ async function loadMissionRoute() {
   stopNavigationSimulation();
   const site = document.getElementById('siteSelect').value;
   try {
-    const plan = await getMissionPlan(site);
-    const details = plan.site_details || FALLBACK_MARS_DATA[site.toLowerCase()];
+    const loadedPlan = await getMissionPlan(site);
+    const details = loadedPlan.site_details || FALLBACK_MARS_DATA[site.toLowerCase()];
+    const routeLocations = populateRouteSelectors(details);
+    const departure = routeLocations.find((location) => location.id === document.getElementById('departureSelect').value);
+    const arrival = routeLocations.find((location) => location.id === document.getElementById('arrivalSelect').value);
+    const waypoints = getRouteBetweenLocations(details, departure, arrival);
+    const plan = buildPlanFromSiteData(details, waypoints);
+    currentRouteEndpoints = { departure, arrival };
 
     hazardLayerGroup.clearLayers();
     routeLayerGroup.clearLayers();
@@ -369,18 +446,13 @@ async function loadMissionRoute() {
     document.getElementById('o2Val').innerText = o2Remaining;
     document.getElementById('battVal').innerText = battRemaining;
 
-    // Update Progress Bars & Endpoints
+    // Update Progress Bars
     const o2Bar = document.getElementById('o2Bar');
     const battBar = document.getElementById('battBar');
     if (o2Bar) o2Bar.style.width = `${o2Remaining}%`;
     if (battBar) battBar.style.width = `${battRemaining}%`;
 
     if (details) {
-      const originEl = document.getElementById('originName');
-      const destEl = document.getElementById('destName');
-      if (originEl && details.base_habitat) originEl.innerText = details.base_habitat.name;
-      if (destEl && details.unstudied_poi) destEl.innerText = details.unstudied_poi.name;
-
       if (details.telemetry) {
         const tempEl = document.getElementById('tempVal');
         const pressEl = document.getElementById('pressureVal');
@@ -440,7 +512,6 @@ async function loadMissionRoute() {
     });
 
     // 2. Google Maps-Style Dual-Casing Route Polyline
-    const waypoints = plan.waypoints;
     currentWaypoints = waypoints;
 
     // Outer dark blue casing + glowing inner Google Maps blue line
@@ -473,8 +544,8 @@ async function loadMissionRoute() {
         });
         const startMarker = L.marker(coord, { icon: startIcon }).bindPopup(`
           <div style="font-family:'Inter',sans-serif;">
-            <div style="font-weight:700; color:#60a5fa; margin-bottom:3px;">ORIGIN: ${details?.base_habitat?.name || 'HABITAT BASE'}</div>
-            <div style="font-size:0.78rem; color:#cbd5e1;">Safe Departure Point • Life Support 100% Nominal</div>
+            <div style="font-weight:700; color:#60a5fa; margin-bottom:3px;">ORIGIN: ${departure.name}</div>
+            <div style="font-size:0.78rem; color:#cbd5e1;">Selected departure point • EVA route begins here</div>
           </div>
         `);
         poiLayerGroup.addLayer(startMarker);
@@ -487,8 +558,8 @@ async function loadMissionRoute() {
         });
         const endMarker = L.marker(coord, { icon: endIcon }).bindPopup(`
           <div style="font-family:'Inter',sans-serif;">
-            <div style="font-weight:700; color:#f87171; margin-bottom:3px;">TARGET: ${details?.unstudied_poi?.name || 'SCIENCE POI'}</div>
-            <div style="font-size:0.78rem; color:#cbd5e1;">${details?.unstudied_poi?.scientific_objective || 'High Priority EVA Objective'}</div>
+            <div style="font-weight:700; color:#f87171; margin-bottom:3px;">ARRIVAL: ${arrival.name}</div>
+            <div style="font-size:0.78rem; color:#cbd5e1;">${arrival.id === 'target' ? details?.unstudied_poi?.scientific_objective || 'High Priority EVA Objective' : 'Selected EVA route waypoint'}</div>
           </div>
         `);
         poiLayerGroup.addLayer(endMarker);
@@ -508,7 +579,7 @@ async function loadMissionRoute() {
       }
     });
 
-    renderTurnByTurnSteps(waypoints, details);
+    renderTurnByTurnSteps(waypoints, details, currentRouteEndpoints);
     map.fitBounds(routeLine.getBounds(), { paddingTopLeft: [420, 60], paddingBottomRight: [60, 60] });
 
   } catch (err) {
@@ -586,8 +657,8 @@ function startNavigationSimulation() {
   let tick = 0;
   navAnimationTimer = setInterval(() => {
     if (tick >= interpolated.length) {
-      if (navInstruction) navInstruction.innerText = 'Arrived at Science Target POI';
-      if (navSubtext) navSubtext.innerText = 'EVA Navigation Complete • Ready for surface sampling';
+      if (navInstruction) navInstruction.innerText = `Arrived at ${currentRouteEndpoints.arrival?.name || 'your destination'}`;
+      if (navSubtext) navSubtext.innerText = 'EVA Navigation Complete • Route destination reached';
       clearInterval(navAnimationTimer);
       navAnimationTimer = null;
       return;
@@ -607,6 +678,23 @@ function startNavigationSimulation() {
 // UI Event Listeners
 document.getElementById('loadBtn').addEventListener('click', loadMissionRoute);
 document.getElementById('siteSelect').addEventListener('change', loadMissionRoute);
+
+function handleEndpointSelectionChange(changedId, otherId) {
+  const changedSelect = document.getElementById(changedId);
+  const otherSelect = document.getElementById(otherId);
+  if (changedSelect.value === otherSelect.value) {
+    const alternative = Array.from(otherSelect.options).find((option) => option.value !== changedSelect.value);
+    if (alternative) otherSelect.value = alternative.value;
+  }
+  loadMissionRoute();
+}
+
+document.getElementById('departureSelect').addEventListener('change', () => {
+  handleEndpointSelectionChange('departureSelect', 'arrivalSelect');
+});
+document.getElementById('arrivalSelect').addEventListener('change', () => {
+  handleEndpointSelectionChange('arrivalSelect', 'departureSelect');
+});
 
 const startNavBtn = document.getElementById('startNavBtn');
 if (startNavBtn) startNavBtn.addEventListener('click', startNavigationSimulation);

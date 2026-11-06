@@ -4,6 +4,8 @@ const test = require('node:test');
 const missionData = require('../Data/marsData.json');
 const pathFinderService = require('../Services/PathFinderService');
 
+// Check that a known site's route produces a usable plan and consistent
+// distance and oxygen figures.
 test('calculates route distance and suit telemetry for Jezero Crater', () => {
   const result = pathFinderService.calculateSafeEVA(missionData.jezero_crater);
 
