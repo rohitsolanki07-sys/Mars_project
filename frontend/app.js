@@ -7,11 +7,52 @@ const map = L.map('map', {
 
 L.control.zoom({ position: 'topright' }).addTo(map);
 
-// 1. ASLI MARS CRATER SURFACE (NASA / USGS Shaded Relief & Imagery)
-const marsShadedRelief = L.tileLayer('https://cartocdn-gusc.global.ssl.fastly.net/opmbuilder/api/v1/map/named/opm-mars-basemap-v0-1/all/{z}/{x}/{y}.png', {
+// 1. NASA Mars Trek Viking MDIM 2.1 global color mosaic
+const MarsTrekImageLayer = L.GridLayer.extend({
+  createTile: function (coords, done) {
+    const tile = document.createElement('img');
+    const tileSize = this.getTileSize();
+    const northWest = map.unproject(
+      L.point(coords.x * tileSize.x, coords.y * tileSize.y),
+      coords.z
+    );
+    const southEast = map.unproject(
+      L.point((coords.x + 1) * tileSize.x, (coords.y + 1) * tileSize.y),
+      coords.z
+    );
+    const topLeft = map.options.crs.project(northWest);
+    const bottomRight = map.options.crs.project(southEast);
+    const url = new URL(
+      'https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_Viking_MDIM21_ClrMosaic_global_232m/ImageServer/exportImage'
+    );
+
+    url.search = new URLSearchParams({
+      bbox: `${topLeft.x},${bottomRight.y},${bottomRight.x},${topLeft.y}`,
+      bboxSR: '3857',
+      imageSR: '3857',
+      size: `${tileSize.x},${tileSize.y}`,
+      format: 'png',
+      interpolation: 'RSP_Bilinear',
+      f: 'image'
+    }).toString();
+
+    tile.alt = '';
+    tile.setAttribute('role', 'presentation');
+    tile.onload = function () {
+      done(null, tile);
+    };
+    tile.onerror = function () {
+      done(new Error('Failed to load a NASA Mars Trek map tile.'), tile);
+    };
+    tile.src = url.toString();
+    return tile;
+  }
+});
+
+const marsShadedRelief = new MarsTrekImageLayer({
   maxZoom: 9,
   minZoom: 2,
-  attribution: '&copy; NASA / USGS / OpenPlanetary'
+  attribution: '&copy; <a href="https://trek.nasa.gov/mars/" target="_blank" rel="noopener noreferrer">NASA/JPL Mars Trek — Viking MDIM 2.1</a>'
 }).addTo(map);
 
 // 2. ASLI NASA MOLA COLOR ALTITUDE TOPOGRAPHY (PIA02820 Rainbow/Elevation Spectrum)
@@ -29,7 +70,7 @@ const poiLayerGroup = L.layerGroup().addTo(map);
 
 // Multi-Layer Toggle Controls (Top Right)
 const baseMaps = {
-  "Martian Surface Texture": marsShadedRelief
+  "NASA Mars Trek Viking Mosaic": marsShadedRelief
 };
 
 const overlayMaps = {
@@ -65,7 +106,7 @@ molaLegend.addTo(map);
 async function loadMissionRoute() {
   const site = document.getElementById('siteSelect').value;
   try {
-    const res = await fetch(`http://localhost:5000/api/route/${site}`);
+    const res = await fetch(`/api/route/${site}`);
     const result = await res.json();
 
     if (!result.success) return alert("Failed to fetch route");
@@ -142,7 +183,7 @@ async function loadMissionRoute() {
 
   } catch (err) {
     console.error(err);
-    alert("Backend port 5000 check karo!");
+    alert("Unable to load the mission route. Check that the Mars Navigator server is running.");
   }
 }
 
