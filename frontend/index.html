@@ -5,18 +5,91 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mars Maps — AresNav EVA Navigation</title>
 
-  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <script>
+    try {
+      if (window.localStorage.getItem('ares-nav-theme') === 'dark') {
+        document.documentElement.dataset.theme = 'dark';
+      }
+    } catch {}
+  </script>
+
+  <!-- Google Fonts: Roboto -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Widgets/widgets.css">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <!-- Full-Screen Map Canvas -->
-  <div id="map"></div>
+<body data-app-view="planner" data-map-size="window">
+  <!-- Floating Mars map window -->
+  <div id="mapFrame" class="map-frame">
+    <div id="map"></div>
+    <div class="globe-controls" aria-label="Globe navigation">
+      <button id="globeZoomIn" type="button" aria-label="Zoom in">+</button>
+      <button id="globeZoomOut" type="button" aria-label="Zoom out">−</button>
+      <button id="globeHome" type="button" aria-label="Show the whole Mars globe">◎</button>
+    </div>
+    <button
+      id="mapFullscreenToggle"
+      class="map-fullscreen-toggle"
+      type="button"
+      aria-pressed="false"
+      aria-label="Expand map to full screen"
+      title="Expand map to full screen"
+    ><span aria-hidden="true">⛶</span><span id="mapSizeLabel">Full screen</span></button>
+  </div>
+  <div id="mapPopup" class="mars-map-popup" hidden>
+    <button id="mapPopupClose" type="button" aria-label="Close map details">×</button>
+    <div id="mapPopupContent"></div>
+  </div>
+
+  <!-- Primary App Navigation -->
+  <header class="app-navbar">
+    <button class="app-brand" type="button" data-app-view="map" aria-label="Go to the Mars map">
+      <span class="app-brand-mark">✦</span>
+      <span class="app-brand-copy">
+        <strong>ARES NAV</strong>
+        <small>MISSION CONTROL</small>
+      </span>
+    </button>
+
+    <nav class="app-nav-links" aria-label="Main navigation">
+      <button class="app-nav-link" type="button" data-app-view="map" aria-current="false">
+        <span class="app-nav-icon">◎</span><span>Map</span>
+      </button>
+      <button class="app-nav-link active" type="button" data-app-view="planner" aria-current="page">
+        <span class="app-nav-icon">⌖</span><span>Planner</span>
+      </button>
+      <button class="app-nav-link" type="button" data-app-view="telemetry" aria-current="false">
+        <span class="app-nav-icon">▥</span><span>Telemetry</span>
+      </button>
+      <button class="app-nav-link" type="button" data-app-view="layers" aria-current="false">
+        <span class="app-nav-icon">▦</span><span>Layers</span>
+      </button>
+      <button class="app-nav-link" type="button" data-app-view="hazards" aria-current="false">
+        <span class="app-nav-icon">⚠</span><span>Hazards</span>
+      </button>
+    </nav>
+
+    <div class="app-nav-actions">
+      <div class="app-nav-readout" aria-label="Current mission status">
+        <span class="app-nav-live-dot" aria-hidden="true"></span>
+        <div class="app-nav-readout-copy">
+          <strong id="navbarMissionStatus">STANDBY</strong>
+          <span id="navbarSiteName">Jezero Crater</span>
+        </div>
+      </div>
+      <button
+        class="theme-toggle-btn"
+        id="themeToggleBtn"
+        type="button"
+        aria-label="Switch to dark mode"
+        aria-pressed="false"
+        title="Switch to dark mode"
+      ><span aria-hidden="true">☾</span></button>
+    </div>
+  </header>
 
   <!-- Top-Center Turn-by-Turn Active Navigation Banner (Google Maps Navigation HUD) -->
   <div id="navBanner" class="nav-hud-banner hidden">
@@ -26,29 +99,6 @@
       <div class="nav-hud-secondary" id="navSubtext">Next segment: 2.4 km • Avoid Canyon Sand Trap</div>
     </div>
     <button id="stopNavBtn" class="nav-stop-btn" title="Exit Navigation">Exit</button>
-  </div>
-
-  <!-- Top-Right Floating Map Layer Pills & Mission Weather Chip -->
-  <div class="floating-top-right">
-    <div class="env-weather-pill" id="envPill">
-      <span class="weather-dot"></span>
-      <span id="tempVal">-58°C</span>
-      <span class="divider">|</span>
-      <span id="pressureVal">820 Pa</span>
-      <span class="divider">|</span>
-      <span id="radVal">0.21 mSv/d</span>
-    </div>
-    <div class="layer-pills">
-      <button class="layer-pill active" id="toggleMolaBtn" title="Toggle NASA MOLA Elevation Overlay">
-        🌈 MOLA Elevation
-      </button>
-      <button class="layer-pill active" id="toggleHazardsBtn" title="Toggle Slope & Boulder Hazards">
-        ⚠️ Hazards
-      </button>
-      <button class="layer-pill active" id="togglePlaceNamesBtn" title="Toggle NASA Mars place names" aria-pressed="true">
-        🏷️ Place Names
-      </button>
-    </div>
   </div>
 
   <!-- Left Floating Google Maps Directions & Telemetry Panel -->
@@ -135,8 +185,52 @@
 
     <!-- Scrollable Route Summary, Telemetry, Steps & Hazards -->
     <div class="nav-sidebar-body">
+      <div class="section-block" id="layerSection" hidden>
+        <div class="section-title">MAP LAYERS</div>
+        <button
+          type="button"
+          class="sidebar-layer-toggle active"
+          id="toggleMolaBtn"
+          aria-pressed="true"
+          title="Toggle NASA Mars Trek MOLA color-shaded terrain"
+        >
+          <span class="sidebar-layer-name">
+            <span aria-hidden="true">🌋</span>
+            <span>MOLA color-shaded terrain</span>
+          </span>
+          <span class="sidebar-layer-state" aria-hidden="true">On</span>
+        </button>
+        <button
+          type="button"
+          class="sidebar-layer-toggle active"
+          id="toggleHazardsBtn"
+          aria-pressed="true"
+          title="Toggle terrain hazard zones"
+        >
+          <span class="sidebar-layer-name">
+            <span aria-hidden="true">⚠️</span>
+            <span>Hazard zones</span>
+          </span>
+          <span class="sidebar-layer-state" aria-hidden="true">On</span>
+        </button>
+        <button
+          type="button"
+          class="sidebar-layer-toggle active"
+          id="togglePlaceNamesBtn"
+          aria-pressed="true"
+          title="Toggle NASA Mars place names"
+        >
+          <span class="sidebar-layer-name">
+            <span aria-hidden="true">🏷️</span>
+            <span>NASA place names</span>
+          </span>
+          <span class="sidebar-layer-state" aria-hidden="true">On</span>
+        </button>
+        <p class="sidebar-layer-description">NASA Mars Trek elevation and shaded relief</p>
+      </div>
+
       <!-- Primary Route ETA Card (Google Maps style) -->
-      <div class="eta-summary-card">
+      <div class="eta-summary-card" id="routeSummarySection">
         <div class="eta-main">
           <div class="eta-time"><span id="timeVal">--</span> hrs</div>
           <div class="eta-dist">(<span id="distVal">--</span> km)</div>
@@ -153,7 +247,16 @@
       </div>
 
       <!-- Suit Life Support Gauges -->
-      <div class="section-block">
+      <div class="section-block" id="telemetrySection" hidden>
+        <div class="section-title">SURFACE CONDITIONS</div>
+        <div class="env-weather-pill" id="envPill">
+          <span class="weather-dot"></span>
+          <span id="tempVal">-58°C</span>
+          <span class="divider">|</span>
+          <span id="pressureVal">820 Pa</span>
+          <span class="divider">|</span>
+          <span id="radVal">0.21 mSv/d</span>
+        </div>
         <div class="section-title">SUIT LIFE SUPPORT & CONSUMABLES</div>
         <div class="gauges-grid">
           <div class="gauge-card">
@@ -178,7 +281,7 @@
       </div>
 
       <!-- Hazard Advisories -->
-      <div class="section-block">
+      <div class="section-block" id="hazardSection" hidden>
         <div class="section-title">TERRAIN HAZARD ADVISORIES</div>
         <div id="hazardList" class="hazard-box">
           No active hazards loaded.
@@ -186,7 +289,7 @@
       </div>
 
       <!-- Turn-by-Turn Waypoint Steps -->
-      <div class="section-block">
+      <div class="section-block" id="routeStepsSection">
         <div class="section-title">TURN-BY-TURN EVA WAYPOINTS</div>
         <div id="stepsList" class="steps-list"></div>
       </div>
@@ -203,8 +306,7 @@
     <span id="placesStatus" role="status" aria-live="polite">Loading NASA place names...</span>
   </div>
 
-  <!-- Leaflet JS & App JS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Cesium.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

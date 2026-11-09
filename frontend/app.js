@@ -1,73 +1,729 @@
-// Map Initialization (Stable Web Mercator)
-const map = L.map('map', {
-  zoomControl: false,
-  minZoom: 2,
-  maxZoom: 9
-}).setView([18.48, 77.42], 8);
+const MARS_ELLIPSOID = new Cesium.Ellipsoid(3396190, 3396190, 3376200);
+const viewer = new Cesium.Viewer('map', {
+  animation: false,
+  baseLayer: false,
+  baseLayerPicker: false,
+  fullscreenButton: false,
+  geocoder: false,
+  homeButton: false,
+  infoBox: false,
+  navigationHelpButton: false,
+  sceneModePicker: false,
+  selectionIndicator: false,
+  timeline: false,
+  globe: new Cesium.Globe(MARS_ELLIPSOID),
+  mapProjection: new Cesium.GeographicProjection(MARS_ELLIPSOID),
+  terrainProvider: new Cesium.EllipsoidTerrainProvider({
+    ellipsoid: MARS_ELLIPSOID
+  })
+});
 
-L.control.zoom({ position: 'bottomright' }).addTo(map);
+viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#100d0d');
+viewer.scene.globe.showGroundAtmosphere = false;
+viewer.scene.skyAtmosphere.show = false;
+viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#060914');
+const marsCameraController = viewer.scene.screenSpaceCameraController;
+// Mars Trek imagery uses an ellipsoid (no detailed terrain), so allow the
+// camera to zoom close to the surface without Cesium's Mars-scaled defaults
+// making the globe feel like it has hit a hard stop.
+marsCameraController.minimumZoomDistance = 250;
+marsCameraController.maximumZoomDistance = 44000000;
+marsCameraController.minimumCollisionTerrainHeight = 250;
+marsCameraController.minimumPickingTerrainDistanceWithInertia = 250;
+marsCameraController.zoomFactor = 10;
+marsCameraController.enableTilt = true;
+marsCameraController.enableLook = true;
+// Cesium's collision check can clamp the Mars-sized globe as if it were Earth.
+// Keep the near-surface zoom limit above, but disable that mismatched collision.
+marsCameraController.enableCollisionDetection = false;
 
-// 1. NASA Mars Trek Viking MDIM 2.1 global color mosaic
-const MarsTrekImageLayer = L.GridLayer.extend({
-  createTile: function (coords, done) {
-    const tile = document.createElement('img');
-    const tileSize = this.getTileSize();
-    const northWest = map.unproject(
-      L.point(coords.x * tileSize.x, coords.y * tileSize.y),
-      coords.z
+const mapFrame = document.getElementById('mapFrame');
+const mapFullscreenToggle = document.getElementById('mapFullscreenToggle');
+const mapSizeLabel = document.getElementById('mapSizeLabel');
+let mapResizeTimer = null;
+
+function resizeMarsMapAfterLayout() {
+  window.requestAnimationFrame(() => {
+    viewer.resize();
+    viewer.scene.requestRender();
+    window.clearTimeout(mapResizeTimer);
+    mapResizeTimer = window.setTimeout(() => {
+      viewer.resize();
+      viewer.scene.requestRender();
+    }, 380);
+  });
+}
+
+function setMarsMapSize(fullscreen) {
+  const expanded = Boolean(fullscreen);
+  document.body.dataset.mapSize = expanded ? 'full' : 'window';
+  if (mapFullscreenToggle) {
+    mapFullscreenToggle.setAttribute('aria-pressed', String(expanded));
+    mapFullscreenToggle.setAttribute(
+      'aria-label',
+      expanded ? 'Restore map window' : 'Expand map to full screen'
     );
-    const southEast = map.unproject(
-      L.point((coords.x + 1) * tileSize.x, (coords.y + 1) * tileSize.y),
-      coords.z
-    );
-    const topLeft = map.options.crs.project(northWest);
-    const bottomRight = map.options.crs.project(southEast);
-    const url = new URL(
-      'https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_Viking_MDIM21_ClrMosaic_global_232m/ImageServer/exportImage'
-    );
+    mapFullscreenToggle.title = expanded ? 'Restore map window' : 'Expand map to full screen';
+  }
+  if (mapSizeLabel) mapSizeLabel.textContent = expanded ? 'Map window' : 'Full screen';
+  resizeMarsMapAfterLayout();
+}
 
-    url.search = new URLSearchParams({
-      bbox: `${topLeft.x},${bottomRight.y},${bottomRight.x},${topLeft.y}`,
-      bboxSR: '3857',
-      imageSR: '3857',
-      size: `${tileSize.x},${tileSize.y}`,
-      format: 'png',
-      interpolation: 'RSP_Bilinear',
-      f: 'image'
-    }).toString();
+mapFullscreenToggle?.addEventListener('click', () => {
+  setMarsMapSize(document.body.dataset.mapSize !== 'full');
+});
+window.addEventListener('resize', () => viewer.resize());
 
-    tile.alt = '';
-    tile.setAttribute('role', 'presentation');
-    tile.onload = function () {
-      done(null, tile);
-    };
-    tile.onerror = function () {
-      done(new Error('Failed to load a NASA Mars Trek map tile.'), tile);
-    };
-    tile.src = url.toString();
-    return tile;
+viewer.camera.setView({
+  destination: Cesium.Cartesian3.fromDegrees(77.42, 18.48, 7000000),
+  orientation: {
+    heading: 0,
+    pitch: -Math.PI / 2,
+    roll: 0
   }
 });
 
-const marsShadedRelief = new MarsTrekImageLayer({
-  maxZoom: 9,
-  minZoom: 2,
-  attribution: '&copy; <a href="https://trek.nasa.gov/mars/" target="_blank" rel="noopener noreferrer">NASA/JPL Mars Trek — Viking MDIM 2.1</a>'
-}).addTo(map);
+const mapListeners = new Map();
+const marsMapContainer = viewer.container;
+const mapPopup = document.getElementById('mapPopup');
+const mapPopupContent = document.getElementById('mapPopupContent');
 
-// 2. NASA MOLA Color Altitude Topography (PIA02820 Rainbow/Elevation Spectrum)
-const molaElevationOverlay = L.tileLayer('https://cartocdn-gusc.global.ssl.fastly.net/opmbuilder/api/v1/map/named/opm-mars-elevation-v0-1/all/{z}/{x}/{y}.png', {
-  maxZoom: 9,
-  minZoom: 2,
-  opacity: 0.55,
-  attribution: '&copy; NASA MGS MOLA Elevation Dataset'
-}).addTo(map);
+function showMapPopup(content, screenPosition) {
+  if (!mapPopup || !mapPopupContent) return;
+  mapPopupContent.replaceChildren();
+  if (content instanceof HTMLElement) {
+    mapPopupContent.append(content);
+  } else {
+    mapPopupContent.textContent = String(content);
+  }
+  mapPopup.hidden = false;
+  const mapBounds = mapFrame.getBoundingClientRect();
+  const left = Math.min(
+    Math.max(mapBounds.left + 12, mapBounds.left + screenPosition.x + 14),
+    mapBounds.right - mapPopup.offsetWidth - 12
+  );
+  const top = Math.min(
+    Math.max(mapBounds.top + 12, mapBounds.top + screenPosition.y + 14),
+    mapBounds.bottom - mapPopup.offsetHeight - 12
+  );
+  mapPopup.style.left = `${left}px`;
+  mapPopup.style.top = `${top}px`;
+}
 
-// Layer Groups
-const hazardLayerGroup = L.layerGroup().addTo(map);
-const routeLayerGroup = L.layerGroup().addTo(map);
-const poiLayerGroup = L.layerGroup().addTo(map);
-const placeNamesLayerGroup = L.layerGroup().addTo(map);
+function getMarsPosition(screenPosition) {
+  const cartesian = viewer.camera.pickEllipsoid(screenPosition, MARS_ELLIPSOID);
+  if (!cartesian) return null;
+  const cartographic = Cesium.Cartographic.fromCartesian(
+    cartesian,
+    MARS_ELLIPSOID
+  );
+  return {
+    lat: Cesium.Math.toDegrees(cartographic.latitude),
+    lng: Cesium.Math.toDegrees(cartographic.longitude)
+  };
+}
+
+function getViewBounds() {
+  const rectangle = viewer.camera.computeViewRectangle(MARS_ELLIPSOID);
+  if (!rectangle) {
+    const width = marsMapContainer.clientWidth;
+    const height = marsMapContainer.clientHeight;
+    const centerLongitude = Cesium.Math.toDegrees(
+      viewer.camera.positionCartographic.longitude
+    );
+    const visiblePoints = [];
+
+    for (let row = 0; row <= 4; row += 1) {
+      for (let column = 0; column <= 4; column += 1) {
+        const point = getMarsPosition(
+          new Cesium.Cartesian2(
+            (width * column) / 4,
+            (height * row) / 4
+          )
+        );
+        if (point) {
+          const longitudeOffset =
+            ((point.lng - centerLongitude + 540) % 360) - 180;
+          visiblePoints.push({
+            latitude: point.lat,
+            longitude: centerLongitude + longitudeOffset
+          });
+        }
+      }
+    }
+
+    if (visiblePoints.length) {
+      const longitudes = visiblePoints.map((point) => point.longitude);
+      const latitudes = visiblePoints.map((point) => point.latitude);
+      const west = Math.min(...longitudes);
+      const east = Math.max(...longitudes);
+      const crossesDateLine = west < -180 || east > 180 || east - west > 180;
+      return {
+        getWest: () => crossesDateLine ? -180 : west,
+        getSouth: () => Math.min(...latitudes),
+        getEast: () => crossesDateLine ? 180 : east,
+        getNorth: () => Math.max(...latitudes)
+      };
+    }
+
+    return {
+      getWest: () => -180,
+      getSouth: () => -90,
+      getEast: () => 180,
+      getNorth: () => 90
+    };
+  }
+
+  const west = Cesium.Math.toDegrees(rectangle.west);
+  const east = Cesium.Math.toDegrees(rectangle.east);
+  return {
+    getWest: () => west > east ? -180 : west,
+    getSouth: () => Cesium.Math.toDegrees(rectangle.south),
+    getEast: () => west > east ? 180 : east,
+    getNorth: () => Cesium.Math.toDegrees(rectangle.north)
+  };
+}
+
+function heightForGlobeZoom(zoom) {
+  return 44000000 / (2 ** Math.max(1, Math.min(12, zoom)));
+}
+
+const map = {
+  on(events, callback) {
+    events.split(/\s+/).forEach((event) => {
+      if (!mapListeners.has(event)) mapListeners.set(event, new Set());
+      mapListeners.get(event).add(callback);
+    });
+    return this;
+  },
+  emit(event, payload) {
+    mapListeners.get(event)?.forEach((callback) => callback(payload));
+  },
+  getBounds: getViewBounds,
+  getContainer: () => marsMapContainer,
+  getSize: () => ({
+    x: marsMapContainer.clientWidth,
+    y: marsMapContainer.clientHeight
+  }),
+  getZoom() {
+    return Math.max(
+      1,
+      Math.min(12, Math.log2(44000000 / viewer.camera.positionCartographic.height))
+    );
+  },
+  latLngToContainerPoint([latitude, longitude]) {
+    const position = Cesium.Cartesian3.fromDegrees(
+      longitude,
+      latitude,
+      0,
+      MARS_ELLIPSOID
+    );
+    const occluder = new Cesium.EllipsoidalOccluder(
+      MARS_ELLIPSOID,
+      viewer.camera.positionWC
+    );
+    if (!occluder.isPointVisible(position)) return null;
+    return viewer.scene.cartesianToCanvasCoordinates(position);
+  },
+  flyTo([latitude, longitude], zoom, options = {}) {
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(
+        longitude,
+        latitude,
+        heightForGlobeZoom(zoom),
+        MARS_ELLIPSOID
+      ),
+      orientation: {
+        heading: viewer.camera.heading,
+        pitch: -Math.PI / 2,
+        roll: 0
+      },
+      duration: options.duration ?? 1
+    });
+  },
+  fitBounds(bounds, options = {}) {
+    if (bounds?.points?.length) {
+      const positions = bounds.points.map(([latitude, longitude]) =>
+        Cesium.Cartesian3.fromDegrees(longitude, latitude, 0, MARS_ELLIPSOID)
+      );
+      const sphere = Cesium.BoundingSphere.fromPoints(positions);
+      const center = Cesium.Cartographic.fromCartesian(
+        sphere.center,
+        MARS_ELLIPSOID
+      );
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromRadians(
+          center.longitude,
+          center.latitude,
+          Math.max(40000, sphere.radius * 3.5),
+          MARS_ELLIPSOID
+        ),
+        orientation: {
+          heading: viewer.camera.heading,
+          pitch: -Math.PI / 2,
+          roll: 0
+        },
+        duration: options.duration ?? 0.8
+      });
+      return;
+    }
+
+    viewer.camera.flyTo({
+      destination: Cesium.Rectangle.fromDegrees(
+        bounds.getWest(),
+        bounds.getSouth(),
+        bounds.getEast(),
+        bounds.getNorth()
+      ),
+      orientation: {
+        heading: viewer.camera.heading,
+        pitch: -Math.PI / 2,
+        roll: 0
+      },
+      duration: options.duration ?? 0.8
+    });
+  },
+  hasLayer(layer) {
+    return layer.visible ?? layer.show ?? false;
+  },
+  addLayer(layer) {
+    if ('visible' in layer) {
+      layer.visible = true;
+      layer.entities?.forEach((entity) => { entity.show = true; });
+    } else if ('show' in layer) {
+      layer.show = true;
+    }
+  },
+  removeLayer(layer) {
+    if ('visible' in layer) {
+      layer.visible = false;
+      layer.entities?.forEach((entity) => { entity.show = false; });
+    } else if ('show' in layer) {
+      layer.show = false;
+    }
+  },
+  invalidateSize() {
+    viewer.resize();
+    viewer.scene.requestRender();
+  }
+};
+
+const marsOverlay = document.createElement('div');
+marsOverlay.className = 'mars-globe-entity-overlay';
+const marsOverlayGraphics = document.createElementNS(
+  'http://www.w3.org/2000/svg',
+  'svg'
+);
+marsOverlayGraphics.setAttribute('class', 'mars-globe-overlay-graphics');
+marsOverlayGraphics.setAttribute('aria-hidden', 'true');
+const marsOverlayLabels = document.createElement('div');
+marsOverlayLabels.className = 'mars-globe-overlay-labels';
+marsOverlay.append(marsOverlayGraphics, marsOverlayLabels);
+viewer.container.append(marsOverlay);
+
+const marsOverlayNodes = new Map();
+
+function getOverlayPropertyValue(property, time) {
+  return property?.getValue ? property.getValue(time) : property;
+}
+
+function getOverlayNode(entity, type) {
+  let overlay = marsOverlayNodes.get(entity.id);
+  if (overlay?.type === type) return overlay.element;
+  overlay?.element.remove();
+
+  const element = document.createElementNS(
+    'http://www.w3.org/2000/svg',
+    type === 'path' ? 'path' : 'circle'
+  );
+  element.setAttribute('class', `mars-globe-overlay-${type}`);
+  marsOverlayGraphics.append(element);
+  marsOverlayNodes.set(entity.id, { type, element });
+  return element;
+}
+
+function getOverlayLabelNode(entity) {
+  let overlay = marsOverlayNodes.get(entity.id);
+  if (overlay?.type === 'label') return overlay.element;
+  overlay?.element.remove();
+
+  const element = document.createElement('button');
+  element.type = 'button';
+  element.className = 'mars-globe-entity-label';
+  element.addEventListener('click', (event) => {
+    event.preventDefault();
+    const time = viewer.clock.currentTime;
+    const position = entity.position?.getValue(time);
+    if (!position) return;
+
+    const cartographic = Cesium.Cartographic.fromCartesian(
+      position,
+      MARS_ELLIPSOID
+    );
+    const containerBounds = viewer.container.getBoundingClientRect();
+    const screenPosition = {
+      x: event.clientX - containerBounds.left,
+      y: event.clientY - containerBounds.top
+    };
+    if (entity.mapPopup) showMapPopup(entity.mapPopup, screenPosition);
+    map.emit('click', {
+      latlng: {
+        lat: Cesium.Math.toDegrees(cartographic.latitude),
+        lng: Cesium.Math.toDegrees(cartographic.longitude)
+      },
+      originalEvent: event
+    });
+  });
+  marsOverlayLabels.append(element);
+  marsOverlayNodes.set(entity.id, { type: 'label', element });
+  return element;
+}
+
+function projectMarsPolyline(positions, occluder) {
+  if (positions.length < 2) return '';
+  let path = '';
+  let drawing = false;
+
+  for (let segment = 0; segment < positions.length - 1; segment += 1) {
+    const start = Cesium.Cartographic.fromCartesian(
+      positions[segment],
+      MARS_ELLIPSOID
+    );
+    const end = Cesium.Cartographic.fromCartesian(
+      positions[segment + 1],
+      MARS_ELLIPSOID
+    );
+    const geodesic = new Cesium.EllipsoidGeodesic(
+      start,
+      end,
+      MARS_ELLIPSOID
+    );
+    const steps = Math.max(2, Math.ceil(geodesic.surfaceDistance / 50000));
+
+    for (let step = 0; step <= steps; step += 1) {
+      const cartographic = geodesic.interpolateUsingFraction(step / steps);
+      const position = Cesium.Cartesian3.fromRadians(
+        cartographic.longitude,
+        cartographic.latitude,
+        1500,
+        MARS_ELLIPSOID
+      );
+      const screen = occluder.isPointVisible(position)
+        ? viewer.scene.cartesianToCanvasCoordinates(position)
+        : null;
+
+      if (!screen) {
+        drawing = false;
+        continue;
+      }
+
+      path += `${drawing ? 'L' : 'M'}${screen.x.toFixed(1)},${screen.y.toFixed(1)}`;
+      drawing = true;
+    }
+  }
+
+  return path;
+}
+
+function renderMarsEntityOverlay() {
+  const time = viewer.clock.currentTime;
+  const occluder = new Cesium.EllipsoidalOccluder(
+    MARS_ELLIPSOID,
+    viewer.camera.positionWC
+  );
+  const activeIds = new Set();
+  const canvasWidth = viewer.canvas.clientWidth;
+  const canvasHeight = viewer.canvas.clientHeight;
+
+  viewer.entities.values.forEach((entity) => {
+    if (!entity.show) return;
+    const polyline = entity.polyline;
+    const ellipse = entity.ellipse;
+
+    if (polyline) {
+      const positions = getOverlayPropertyValue(polyline.positions, time) || [];
+      const path = getOverlayNode(entity, 'path');
+      const material = getOverlayPropertyValue(polyline.material, time);
+      path.setAttribute('d', projectMarsPolyline(positions, occluder));
+      path.setAttribute(
+        'stroke',
+        material?.color?.toCssColorString?.() || '#60a5fa'
+      );
+      path.setAttribute(
+        'stroke-width',
+        String(getOverlayPropertyValue(polyline.width, time) || 4)
+      );
+      activeIds.add(entity.id);
+      return;
+    }
+
+    const position = entity.position?.getValue(time);
+    if (!position) return;
+    const screen = occluder.isPointVisible(position)
+      ? viewer.scene.cartesianToCanvasCoordinates(position)
+      : null;
+    if (
+      !screen ||
+      screen.x < -300 ||
+      screen.x > canvasWidth + 300 ||
+      screen.y < -100 ||
+      screen.y > canvasHeight + 100
+    ) {
+      return;
+    }
+
+    if (ellipse) {
+      const circle = getOverlayNode(entity, 'circle');
+      const radius = getOverlayPropertyValue(ellipse.semiMajorAxis, time) || 600;
+      const fieldOfView = viewer.camera.frustum.fovy || Math.PI / 3;
+      const radiusPixels = Math.max(
+        2,
+        (radius * canvasHeight) /
+          (2 * viewer.camera.positionCartographic.height * Math.tan(fieldOfView / 2))
+      );
+      const material = getOverlayPropertyValue(ellipse.material, time);
+      circle.setAttribute('cx', screen.x.toFixed(1));
+      circle.setAttribute('cy', screen.y.toFixed(1));
+      circle.setAttribute('r', radiusPixels.toFixed(1));
+      circle.setAttribute(
+        'fill',
+        material?.color?.toCssColorString?.() || 'rgba(234, 67, 53, 0.35)'
+      );
+      activeIds.add(entity.id);
+      return;
+    }
+
+    const label = entity.label;
+    if (!label || getOverlayPropertyValue(label.show, time) === false) return;
+    const labelNode = getOverlayLabelNode(entity);
+    const text = getOverlayPropertyValue(label.text, time) || '';
+    labelNode.textContent = text;
+    labelNode.setAttribute('aria-label', text);
+    labelNode.style.left = `${screen.x}px`;
+    labelNode.style.top = `${screen.y}px`;
+
+    const pixelOffset =
+      getOverlayPropertyValue(label.pixelOffset, time) || Cesium.Cartesian2.ZERO;
+    labelNode.style.marginLeft = `${pixelOffset.x}px`;
+    labelNode.style.marginTop = `${pixelOffset.y}px`;
+
+    const point = entity.point;
+    const isPlaceLabel = Boolean(
+      point && getOverlayPropertyValue(label.showBackground, time)
+    );
+    labelNode.classList.toggle('mars-globe-place-label', isPlaceLabel);
+    labelNode.classList.toggle('mars-globe-point-label', Boolean(point));
+    if (point) {
+      const pointColor = getOverlayPropertyValue(point.color, time);
+      const pointSize = getOverlayPropertyValue(point.pixelSize, time) || 8;
+      labelNode.style.setProperty(
+        '--mars-marker-color',
+        pointColor?.toCssColorString?.() || '#60a5fa'
+      );
+      labelNode.style.setProperty('--mars-marker-size', `${pointSize}px`);
+    }
+
+    const horizontalOrigin = getOverlayPropertyValue(label.horizontalOrigin, time);
+    const verticalOrigin = getOverlayPropertyValue(label.verticalOrigin, time);
+    labelNode.dataset.horizontalOrigin =
+      horizontalOrigin === Cesium.HorizontalOrigin.LEFT
+        ? 'left'
+        : horizontalOrigin === Cesium.HorizontalOrigin.RIGHT
+          ? 'right'
+          : 'center';
+    labelNode.dataset.verticalOrigin =
+      verticalOrigin === Cesium.VerticalOrigin.TOP
+        ? 'top'
+        : verticalOrigin === Cesium.VerticalOrigin.CENTER
+          ? 'center'
+          : 'bottom';
+    labelNode.classList.toggle('mars-globe-navigation-label', !point);
+    activeIds.add(entity.id);
+  });
+
+  marsOverlayNodes.forEach((overlay, id) => {
+    if (activeIds.has(id)) return;
+    overlay.element.remove();
+    marsOverlayNodes.delete(id);
+  });
+}
+
+viewer.scene.postRender.addEventListener(renderMarsEntityOverlay);
+
+const screenHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+screenHandler.setInputAction((movement) => {
+  const picked = viewer.scene.pick(movement.position);
+  const entity = Cesium.defined(picked)
+    ? picked.id ?? picked.primitive?.id
+    : null;
+  if (entity?.mapPopup) showMapPopup(entity.mapPopup, movement.position);
+  else if (mapPopup) mapPopup.hidden = true;
+
+  const latlng = getMarsPosition(movement.position);
+  if (latlng) map.emit('click', { latlng, originalEvent: movement });
+}, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+screenHandler.setInputAction((movement) => {
+  const latlng = getMarsPosition(movement.endPosition);
+  if (latlng) map.emit('mousemove', { latlng });
+}, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+viewer.camera.moveEnd.addEventListener(() => {
+  map.emit('moveend');
+  map.emit('zoomend');
+});
+document.getElementById('mapPopupClose')?.addEventListener('click', () => {
+  mapPopup.hidden = true;
+});
+mapPopup?.addEventListener('pointerdown', (event) => event.stopPropagation());
+
+class GlobeLayerGroup {
+  constructor() {
+    this.entities = new Set();
+    this.visible = true;
+  }
+
+  addTo() {
+    this.visible = true;
+    return this;
+  }
+
+  addLayer(entity) {
+    this.entities.add(entity);
+    entity.show = this.visible;
+    return this;
+  }
+
+  removeLayer(entity) {
+    this.entities.delete(entity);
+    viewer.entities.remove(entity);
+  }
+
+  clearLayers() {
+    this.entities.forEach((entity) => viewer.entities.remove(entity));
+    this.entities.clear();
+  }
+
+  eachLayer(callback) {
+    this.entities.forEach(callback);
+  }
+}
+
+function createMarsTrekImagery(
+  serviceUrl,
+  layerName,
+  {
+    alpha = 1,
+    rectangle = Cesium.Rectangle.fromDegrees(-180, -90, 180, 90),
+    minimumLevel = 0,
+    maximumLevel = 14
+  } = {}
+) {
+  const provider = new Cesium.UrlTemplateImageryProvider({
+    url: `${serviceUrl}?bbox={westDegrees},{southDegrees},{eastDegrees},{northDegrees}&bboxSR=104905&imageSR=104905&size=256,256&format=png32&transparent=true&interpolation=RSP_Bilinear&f=image`,
+    tilingScheme: new Cesium.GeographicTilingScheme({
+      ellipsoid: MARS_ELLIPSOID,
+      numberOfLevelZeroTilesX: 2,
+      numberOfLevelZeroTilesY: 1
+    }),
+    rectangle,
+    tileWidth: 256,
+    tileHeight: 256,
+    minimumLevel,
+    maximumLevel,
+    credit: new Cesium.Credit(
+      `NASA/JPL Mars Trek — ${layerName}`,
+      false
+    )
+  });
+  const layer = viewer.imageryLayers.addImageryProvider(provider);
+  layer.alpha = alpha;
+  return layer;
+}
+
+const marsShadedRelief = createMarsTrekImagery(
+  'https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_Viking_MDIM21_ClrMosaic_global_232m/ImageServer/exportImage',
+  'Viking MDIM 2.1 color mosaic',
+  { maximumLevel: 14 }
+);
+const molaElevationOverlay = createMarsTrekImagery(
+  'https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_MOLA_blend200ppx_HRSC_ClrShade_clon0dd_200mpp/ImageServer/exportImage',
+  'MOLA/HRSC color-shaded relief',
+  { alpha: 0.65 }
+);
+const curiosityHiRISEImagery = createMarsTrekImagery(
+  'https://trek.nasa.gov/mars/trekarcgis/rest/services/curiosity_hirise_mosaic/ImageServer/exportImage',
+  'Curiosity HiRISE surface mosaic',
+  {
+    alpha: 0.78,
+    rectangle: Cesium.Rectangle.fromDegrees(
+      137.12246691438963,
+      -4.925474311955909,
+      137.729812906933,
+      -4.248958839494268
+    ),
+    minimumLevel: 5,
+    maximumLevel: 19
+  }
+);
+const insightCTXImagery = createMarsTrekImagery(
+  'https://trek.nasa.gov/mars/trekarcgis/rest/services/InSightCTXMosaic_112917_gcs/ImageServer/exportImage',
+  'InSight CTX surface mosaic',
+  {
+    alpha: 0.78,
+    rectangle: Cesium.Rectangle.fromDegrees(
+      133.9357319685767,
+      3.728412992963613,
+      137.27612990314537,
+      5.069616759863639
+    ),
+    minimumLevel: 5,
+    maximumLevel: 19
+  }
+);
+const hazardLayerGroup = new GlobeLayerGroup();
+const routeLayerGroup = new GlobeLayerGroup();
+const poiLayerGroup = new GlobeLayerGroup();
+const placeNamesLayerGroup = new GlobeLayerGroup();
+
+const themeToggleBtn = document.getElementById('themeToggleBtn');
+const APP_THEME_STORAGE_KEY = 'ares-nav-theme';
+
+function setAppTheme(theme, savePreference = false) {
+  const selectedTheme = theme === 'dark' ? 'dark' : 'light';
+  const darkModeEnabled = selectedTheme === 'dark';
+  document.documentElement.dataset.theme = selectedTheme;
+  document.body.dataset.theme = selectedTheme;
+
+  if (themeToggleBtn) {
+    themeToggleBtn.setAttribute('aria-pressed', String(darkModeEnabled));
+    themeToggleBtn.setAttribute(
+      'aria-label',
+      darkModeEnabled ? 'Switch to light mode' : 'Switch to dark mode'
+    );
+    themeToggleBtn.title = darkModeEnabled ? 'Switch to light mode' : 'Switch to dark mode';
+    const icon = themeToggleBtn.querySelector('span');
+    if (icon) icon.textContent = darkModeEnabled ? '☀' : '☾';
+  }
+
+  if (savePreference) {
+    try {
+      window.localStorage.setItem(APP_THEME_STORAGE_KEY, selectedTheme);
+    } catch {
+      // Keep the current theme for this visit if browser storage is unavailable.
+    }
+  }
+}
+
+let savedAppTheme = 'light';
+try {
+  savedAppTheme = window.localStorage.getItem(APP_THEME_STORAGE_KEY) || 'light';
+} catch {
+  savedAppTheme = 'light';
+}
+setAppTheme(savedAppTheme);
+themeToggleBtn?.addEventListener('click', () => {
+  setAppTheme(document.body.dataset.theme === 'dark' ? 'light' : 'dark', true);
+});
+
 const NASA_PLACE_LAYERS = [
   {
     name: 'Official Mars nomenclature',
@@ -90,30 +746,49 @@ const NASA_PLACE_LAYERS = [
   }
 ];
 let placeNamesEnabled = true;
+let molaLayerEnabled = true;
+let hazardsLayerEnabled = true;
+let currentAppView = 'planner';
 let placeNamesRequest = null;
 let placeNamesRefreshTimer = null;
 let lastPlaceNamesBounds = '';
 const LOCAL_BACKEND_PORTS = ['3000', '5500', '3001', '3002', '5050', '8080'];
 
-// 3. MOLA Scale Legend (Bottom Right)
-const molaLegend = L.control({ position: 'bottomright' });
-molaLegend.onAdd = function () {
-  const div = L.DomUtil.create('div', 'mola-legend');
-  div.innerHTML = `
-    <h4>NASA MOLA ALTITUDE [KM]</h4>
-    <div class="mola-gradient-bar"></div>
-    <div class="mola-labels">
-      <span>-8</span>
-      <span>-4</span>
-      <span>0</span>
-      <span>+4</span>
-      <span>+8</span>
-      <span>+12</span>
-    </div>
-  `;
-  return div;
+// The terrain legend follows the same toggle as the NASA MOLA overlay.
+const molaLegendElement = document.createElement('div');
+molaLegendElement.className = 'mola-legend';
+molaLegendElement.innerHTML = `
+  <h4>NASA MOLA TERRAIN</h4>
+  <p>Color-shaded elevation and relief</p>
+`;
+document.body.append(molaLegendElement);
+const molaLegend = {
+  addTo() {
+    molaLegendElement.hidden = false;
+  },
+  remove() {
+    molaLegendElement.hidden = true;
+  }
 };
-molaLegend.addTo(map);
+document.getElementById('globeZoomIn')?.addEventListener('click', () => {
+  const height = viewer.camera.positionCartographic.height;
+  const distance = Math.min(
+    height * 0.5,
+    Math.max(0, height - marsCameraController.minimumZoomDistance)
+  );
+  if (distance > 0) viewer.camera.zoomIn(distance);
+});
+document.getElementById('globeZoomOut')?.addEventListener('click', () => {
+  viewer.camera.zoomOut(viewer.camera.positionCartographic.height);
+});
+document.getElementById('globeHome')?.addEventListener('click', () => {
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(77.42, 18.48, 7000000, MARS_ELLIPSOID),
+    orientation: { heading: 0, pitch: -Math.PI / 2, roll: 0 },
+    duration: 1
+  });
+});
+let molaLegendVisible = true;
 
 // Built-in fallback dataset & route calculator so the app works on ANY port, Live Server, or file:// without requiring a separate server restart
 const FALLBACK_MARS_DATA = {
@@ -643,27 +1318,28 @@ function createPlacePopup(place) {
   return popup;
 }
 
+function createMapPopup(title, rows) {
+  const popup = document.createElement('div');
+  popup.className = 'mars-place-popup';
+  const heading = document.createElement('h3');
+  heading.textContent = title;
+  popup.append(heading);
+  rows.forEach(([label, value]) => addPlacePopupRow(popup, label, String(value)));
+  return popup;
+}
+
 function clearPlaceNameLayers() {
-  placeNamesLayerGroup.eachLayer((layer) => {
-    layer.closeTooltip();
-    layer.closePopup();
-    layer.unbindTooltip();
-  });
   placeNamesLayerGroup.clearLayers();
-  document
-    .querySelectorAll('.leaflet-tooltip.mars-place-tooltip')
-    .forEach((tooltip) => tooltip.remove());
 }
 
 function renderNASAPlaces(places, bounds, warnings) {
   clearPlaceNameLayers();
   loadedNASAPlaces = places;
-  const currentBounds = L.latLngBounds(
-    [bounds[1], bounds[0]],
-    [bounds[3], bounds[2]]
-  );
   const visiblePlaces = places.filter((place) =>
-    currentBounds.contains([place.latitude, place.longitude])
+    place.latitude >= bounds[1] &&
+    place.latitude <= bounds[3] &&
+    place.longitude >= bounds[0] &&
+    place.longitude <= bounds[2]
   );
   const zoom = map.getZoom();
   const labels =
@@ -694,10 +1370,12 @@ function renderNASAPlaces(places, bounds, warnings) {
 
   candidates.forEach((place) => {
     if (visibleLabelCount >= maxLabels) return;
-    const nameWidth = Math.min(190, Math.max(40, place.name.length * 7));
-    const elevationWidth = Number.isFinite(place.elevationM) ? 58 : 0;
-    const labelWidth = nameWidth + elevationWidth + 18;
     const point = map.latLngToContainerPoint([place.latitude, place.longitude]);
+    if (!point) return;
+    const labelText = Number.isFinite(place.elevationM)
+      ? `${place.name} · ${place.elevationM.toLocaleString()} m`
+      : place.name;
+    const labelWidth = Math.min(280, Math.max(60, labelText.length * 7));
     const placement = findLabelPlacement(
       point,
       labelWidth,
@@ -707,44 +1385,56 @@ function renderNASAPlaces(places, bounds, warnings) {
     if (!placement) return;
 
     occupiedLabelAreas.push(placement.box);
-
-    const label = document.createElement('span');
-    label.className = 'mars-place-label';
-    const name = document.createElement('span');
-    name.className = 'mars-place-label-name';
-    name.textContent = place.name;
-    label.append(name);
-
-    if (Number.isFinite(place.elevationM)) {
-      const elevation = document.createElement('span');
-      elevation.className = 'mars-place-label-elevation';
-      elevation.textContent = `${place.elevationM.toLocaleString()} m`;
-      label.append(elevation);
-    }
-
-    L.circleMarker([place.latitude, place.longitude], {
-      radius: place.sourceName === 'Named regions' ? 3 : 4,
-      color: '#f8fafc',
-      weight: 1,
-      fillColor: elevationColor(place.elevationM),
-      fillOpacity: 0.95
-    })
-      .on('click', (event) => selectCustomMapPoint(event.latlng))
-      .bindTooltip(label, {
-        permanent: true,
-        direction: placement.direction,
-        offset:
-          placement.direction === 'right'
-            ? [6, 0]
-            : placement.direction === 'left'
-            ? [-6, 0]
-            : placement.direction === 'top'
-            ? [0, -6]
-            : [0, 6],
-        className: 'mars-place-tooltip'
-      })
-      .bindPopup(createPlacePopup(place), { maxWidth: 320 })
-      .addTo(placeNamesLayerGroup);
+    const pixelOffsets = {
+      right: new Cesium.Cartesian2(10, 0),
+      left: new Cesium.Cartesian2(-10, 0),
+      top: new Cesium.Cartesian2(0, -12),
+      bottom: new Cesium.Cartesian2(0, 12)
+    };
+    const horizontalOrigins = {
+      right: Cesium.HorizontalOrigin.LEFT,
+      left: Cesium.HorizontalOrigin.RIGHT,
+      top: Cesium.HorizontalOrigin.CENTER,
+      bottom: Cesium.HorizontalOrigin.CENTER
+    };
+    const verticalOrigins = {
+      right: Cesium.VerticalOrigin.CENTER,
+      left: Cesium.VerticalOrigin.CENTER,
+      top: Cesium.VerticalOrigin.BOTTOM,
+      bottom: Cesium.VerticalOrigin.TOP
+    };
+    const entity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(
+        place.longitude,
+        place.latitude,
+        0,
+        MARS_ELLIPSOID
+      ),
+      point: {
+        pixelSize: place.sourceName === 'Named regions' ? 6 : 8,
+        color: Cesium.Color.fromCssColorString(elevationColor(place.elevationM)),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 1,
+        disableDepthTestDistance: 0
+      },
+      label: {
+        text: labelText,
+        font: '12px Roboto, sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.fromCssColorString('#111827'),
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        showBackground: true,
+        backgroundColor: Cesium.Color.fromCssColorString('#101827').withAlpha(0.88),
+        pixelOffset: pixelOffsets[placement.direction],
+        horizontalOrigin: horizontalOrigins[placement.direction],
+        verticalOrigin: verticalOrigins[placement.direction],
+        scaleByDistance: new Cesium.NearFarScalar(500000, 1, 3000000, 0.7),
+        disableDepthTestDistance: 0
+      }
+    });
+    entity.mapPopup = createPlacePopup(place);
+    placeNamesLayerGroup.addLayer(entity);
     visibleLabelCount += 1;
   });
 
@@ -758,7 +1448,14 @@ function renderNASAPlaces(places, bounds, warnings) {
 }
 
 async function refreshNASAPlaceNames() {
-  if (!placeNamesEnabled) return;
+  if (!placeNamesEnabled || currentAppView !== 'layers') return;
+
+  if (map.getZoom() < 3.2) {
+    clearPlaceNameLayers();
+    const status = document.getElementById('placesStatus');
+    if (status) status.textContent = 'Zoom in to load NASA named features';
+    return;
+  }
 
   const bounds = map.getBounds();
   const safeBounds = [
@@ -1137,6 +1834,10 @@ async function loadMissionRoute() {
 
     // Update Telemetry Panel
     document.getElementById('missionStatus').innerText = plan.mission_status;
+    const navbarMissionStatus = document.getElementById('navbarMissionStatus');
+    const navbarSiteName = document.getElementById('navbarSiteName');
+    if (navbarMissionStatus) navbarMissionStatus.innerText = plan.mission_status.replaceAll('_', ' ');
+    if (navbarSiteName) navbarSiteName.innerText = details.site_name || site;
     document.getElementById('distVal').innerText = plan.total_distance_km;
     document.getElementById('timeVal').innerText = plan.total_duration_hours;
     document.getElementById('routeMetaDesc').innerText = usesSavedRoute
@@ -1189,97 +1890,129 @@ async function loadMissionRoute() {
     }
 
     // 1. Hazards on Map
-    plan.hazards_avoided.forEach(h => {
-      const hazardCircle = L.circle(h.coords, {
-        color: '#ea4335',
-        fillColor: '#ea4335',
-        fillOpacity: 0.35,
-        weight: 2,
-        dashArray: '4, 4',
-        radius: h.radius_meters || 600
-      }).on('click', (event) => selectCustomMapPoint(event.latlng)).bindPopup(`
-        <div style="font-family:'Inter',sans-serif; min-width:190px;">
-          <div style="color:#f87171; font-weight:700; font-size:0.85rem; margin-bottom:4px;">⚠️ HAZARD ZONE: ${h.name}</div>
-          <div style="font-size:0.78rem; color:#e2e8f0;">
-            <b>Type:</b> ${h.type}<br>
-            <b>Slope Gradient:</b> ${h.slope_deg}&deg;<br>
-            <span style="color:#94a3b8;">${usesSavedRoute ? 'Saved mission route is planned around terrain hazards.' : 'Direct custom routes are not checked or rerouted around terrain hazards.'}</span>
-          </div>
-        </div>
-      `);
+    plan.hazards_avoided.forEach((hazard) => {
+      const position = Cesium.Cartesian3.fromDegrees(
+        hazard.coords[1],
+        hazard.coords[0],
+        0,
+        MARS_ELLIPSOID
+      );
+      const hazardCircle = viewer.entities.add({
+        position,
+        ellipse: {
+          semiMajorAxis: hazard.radius_meters || 600,
+          semiMinorAxis: hazard.radius_meters || 600,
+          height: 0,
+          material: Cesium.Color.fromCssColorString('#ea4335').withAlpha(0.35),
+          outline: false
+        }
+      });
+      hazardCircle.mapPopup = createMapPopup(`Hazard zone: ${hazard.name}`, [
+        ['Type', hazard.type],
+        ['Slope gradient', `${hazard.slope_deg}°`],
+        [
+          'Route advisory',
+          usesSavedRoute
+            ? 'The saved mission route is planned around terrain hazards.'
+            : 'Direct custom routes are not checked or rerouted around terrain hazards.'
+        ]
+      ]);
       hazardLayerGroup.addLayer(hazardCircle);
     });
 
-    // 2. Google Maps-Style Dual-Casing Route Polyline
+    // Draw the route as a geodesic line draped over the Mars sphere.
     currentWaypoints = waypoints;
-
-    // Outer dark blue casing + glowing inner Google Maps blue line
-    const routeGlow = L.polyline(waypoints, {
-      color: '#1d4ed8',
-      weight: 10,
-      opacity: 0.45,
-      lineCap: 'round',
-      lineJoin: 'round'
+    const routePositions = Cesium.Cartesian3.fromDegreesArray(
+      waypoints.flatMap(([latitude, longitude]) => [longitude, latitude]),
+      MARS_ELLIPSOID
+    );
+    const routeGlow = viewer.entities.add({
+      polyline: {
+        positions: routePositions,
+        width: 10,
+        material: Cesium.Color.fromCssColorString('#1d4ed8').withAlpha(0.45),
+        arcType: Cesium.ArcType.GEODESIC,
+        clampToGround: true
+      }
     });
-    const routeLine = L.polyline(waypoints, {
-      color: '#60a5fa',
-      weight: 5,
-      opacity: 1,
-      lineCap: 'round',
-      lineJoin: 'round'
-    }).on('click', (event) => selectCustomMapPoint(event.latlng));
+    const routeLine = viewer.entities.add({
+      polyline: {
+        positions: routePositions,
+        width: 5,
+        material: Cesium.Color.fromCssColorString('#60a5fa'),
+        arcType: Cesium.ArcType.GEODESIC,
+        clampToGround: true
+      }
+    });
+    routeLine.getBounds = () => ({ points: waypoints });
     currentRouteLine = routeLine;
     routeLayerGroup.addLayer(routeGlow);
     routeLayerGroup.addLayer(routeLine);
 
-    // 3. Google Maps-Style Custom Markers (Origin A, Intermediate Waypoints, Destination B)
+    // Mark route endpoints and intermediate waypoints directly on the globe.
     waypoints.forEach((coord, idx) => {
+      let markerText = String(idx + 1);
+      let markerColor = '#60a5fa';
+      let popup;
+
       if (idx === 0) {
-        const startIcon = L.divIcon({
-          className: '',
-          html: `<div class="gmap-pin gmap-pin-start">A</div>`,
-          iconSize: [28, 28],
-          iconAnchor: [14, 14]
-        });
-        const startMarker = L.marker(coord, { icon: startIcon }).bindPopup(`
-          <div style="font-family:'Inter',sans-serif;">
-            <div style="font-weight:700; color:#60a5fa; margin-bottom:3px;">ORIGIN: ${departure.name}</div>
-            <div style="font-size:0.78rem; color:#cbd5e1;">Selected departure point • EVA route begins here</div>
-          </div>
-        `).on('click', (event) => selectCustomMapPoint(event.latlng));
-        poiLayerGroup.addLayer(startMarker);
+        markerText = 'A';
+        markerColor = '#3b82f6';
+        popup = createMapPopup(`Origin: ${departure.name}`, [
+          ['Route point', 'Selected departure point; EVA route begins here.']
+        ]);
       } else if (idx === waypoints.length - 1) {
-        const endIcon = L.divIcon({
-          className: '',
-          html: `<div class="gmap-pin gmap-pin-end">B</div>`,
-          iconSize: [32, 32],
-          iconAnchor: [16, 16]
-        });
-        const endMarker = L.marker(coord, { icon: endIcon }).bindPopup(`
-          <div style="font-family:'Inter',sans-serif;">
-            <div style="font-weight:700; color:#f87171; margin-bottom:3px;">ARRIVAL: ${arrival.name}</div>
-            <div style="font-size:0.78rem; color:#cbd5e1;">${arrival.id === 'target' ? details?.unstudied_poi?.scientific_objective || 'High Priority EVA Objective' : 'Selected EVA route waypoint'}</div>
-          </div>
-        `).on('click', (event) => selectCustomMapPoint(event.latlng));
-        poiLayerGroup.addLayer(endMarker);
+        markerText = 'B';
+        markerColor = '#ef4444';
+        popup = createMapPopup(`Arrival: ${arrival.name}`, [
+          [
+            'Objective',
+            arrival.id === 'target'
+              ? details?.unstudied_poi?.scientific_objective || 'High Priority EVA Objective'
+              : 'Selected EVA route waypoint'
+          ]
+        ]);
       } else {
-        const wpIcon = L.divIcon({
-          className: '',
-          html: `<div class="gmap-pin gmap-pin-waypoint">${idx + 1}</div>`,
-          iconSize: [22, 22],
-          iconAnchor: [11, 11]
-        });
-        const wpMarker = L.marker(coord, { icon: wpIcon }).bindPopup(`
-          <div style="font-family:'Inter',sans-serif; font-size:0.78rem;">
-            <b>Waypoint ${idx + 1}</b><br>Lat: ${coord[0].toFixed(4)}°, Lon: ${coord[1].toFixed(4)}°
-          </div>
-        `).on('click', (event) => selectCustomMapPoint(event.latlng));
-        poiLayerGroup.addLayer(wpMarker);
+        popup = createMapPopup(`Waypoint ${idx + 1}`, [
+          ['Latitude', `${coord[0].toFixed(4)}°`],
+          ['Longitude', `${coord[1].toFixed(4)}°`]
+        ]);
       }
+
+      const marker = viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(
+          coord[1],
+          coord[0],
+          1200,
+          MARS_ELLIPSOID
+        ),
+        point: {
+          pixelSize: idx === 0 || idx === waypoints.length - 1 ? 15 : 10,
+          color: Cesium.Color.fromCssColorString(markerColor),
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 2
+        },
+        label: {
+          text: markerText,
+          font: '500 12px Roboto, sans-serif',
+          fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.fromCssColorString('#111827'),
+          outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset: new Cesium.Cartesian2(0, -20),
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          disableDepthTestDistance: 0
+        }
+      });
+      marker.mapPopup = popup;
+      poiLayerGroup.addLayer(marker);
     });
 
     renderTurnByTurnSteps(waypoints, details, currentRouteEndpoints);
-    map.fitBounds(routeLine.getBounds(), { paddingTopLeft: [420, 60], paddingBottomRight: [60, 60] });
+    if (currentAppView === 'planner') {
+      map.fitBounds(routeLine.getBounds());
+    }
+    applyMapLayersForView(currentAppView);
 
   } catch (err) {
     console.error(err);
@@ -1324,14 +2057,20 @@ function startNavigationSimulation() {
   }
 
   const modeEmoji = activeTravelMode === 'rover' ? '🛞' : activeTravelMode === 'drone' ? '🚁' : '🧑‍🚀';
-  const navIcon = L.divIcon({
-    className: '',
-    html: `<div class="gmap-astronaut-nav">${modeEmoji}</div>`,
-    iconSize: [34, 34],
-    iconAnchor: [17, 17]
+  navMarker = viewer.entities.add({
+    position: Cesium.Cartesian3.fromDegrees(
+      currentWaypoints[0][1],
+      currentWaypoints[0][0],
+      1200,
+      MARS_ELLIPSOID
+    ),
+    label: {
+      text: modeEmoji,
+      font: '24px sans-serif',
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      disableDepthTestDistance: 0
+    }
   });
-
-  navMarker = L.marker(currentWaypoints[0], { icon: navIcon, zIndexOffset: 1000 });
   poiLayerGroup.addLayer(navMarker);
 
   // Build interpolated points across segments
@@ -1363,7 +2102,12 @@ function startNavigationSimulation() {
       return;
     }
     const pt = interpolated[tick];
-    navMarker.setLatLng(pt.coord);
+    navMarker.position = Cesium.Cartesian3.fromDegrees(
+      pt.coord[1],
+      pt.coord[0],
+      1200,
+      MARS_ELLIPSOID
+    );
     if (navInstruction) {
       navInstruction.innerText = `Proceed ${pt.dir} toward Waypoint ${pt.segmentIndex + 1}`;
     }
@@ -1457,30 +2201,57 @@ document.querySelectorAll('.mode-tab').forEach((btn) => {
   });
 });
 
-// Top-Right Quick Layer Pills
+function setMapLayerVisible(layer, visible) {
+  if (!layer) return;
+  const isVisible = map.hasLayer(layer);
+  if (visible && !isVisible) map.addLayer(layer);
+  if (!visible && isVisible) map.removeLayer(layer);
+}
+
+function applyMapLayersForView(view = currentAppView) {
+  const showRoute = view === 'map' || view === 'planner';
+  const showHazards = hazardsLayerEnabled && (view === 'hazards' || view === 'layers');
+  const showMola = view === 'layers' && molaLayerEnabled;
+  const showPlaceNames = view === 'layers' && placeNamesEnabled;
+
+  setMapLayerVisible(routeLayerGroup, showRoute);
+  setMapLayerVisible(poiLayerGroup, showRoute);
+  setMapLayerVisible(hazardLayerGroup, showHazards);
+  setMapLayerVisible(molaElevationOverlay, showMola);
+  setMapLayerVisible(placeNamesLayerGroup, showPlaceNames);
+
+  if (showMola && !molaLegendVisible) {
+    molaLegend.addTo(map);
+    molaLegendVisible = true;
+  } else if (!showMola && molaLegendVisible) {
+    molaLegend.remove();
+    molaLegendVisible = false;
+  }
+}
+
+function updateLayerToggle(button, enabled) {
+  button?.classList.toggle('active', enabled);
+  button?.setAttribute('aria-pressed', String(enabled));
+  const state = button?.querySelector('.sidebar-layer-state');
+  if (state) state.textContent = enabled ? 'On' : 'Off';
+}
+
+// Map Layer Toggles
 const toggleMolaBtn = document.getElementById('toggleMolaBtn');
 if (toggleMolaBtn) {
   toggleMolaBtn.addEventListener('click', () => {
-    if (map.hasLayer(molaElevationOverlay)) {
-      map.removeLayer(molaElevationOverlay);
-      toggleMolaBtn.classList.remove('active');
-    } else {
-      map.addLayer(molaElevationOverlay);
-      toggleMolaBtn.classList.add('active');
-    }
+    molaLayerEnabled = !molaLayerEnabled;
+    updateLayerToggle(toggleMolaBtn, molaLayerEnabled);
+    applyMapLayersForView(currentAppView);
   });
 }
 
 const toggleHazardsBtn = document.getElementById('toggleHazardsBtn');
 if (toggleHazardsBtn) {
   toggleHazardsBtn.addEventListener('click', () => {
-    if (map.hasLayer(hazardLayerGroup)) {
-      map.removeLayer(hazardLayerGroup);
-      toggleHazardsBtn.classList.remove('active');
-    } else {
-      map.addLayer(hazardLayerGroup);
-      toggleHazardsBtn.classList.add('active');
-    }
+    hazardsLayerEnabled = !hazardsLayerEnabled;
+    updateLayerToggle(toggleHazardsBtn, hazardsLayerEnabled);
+    applyMapLayersForView(currentAppView);
   });
 }
 
@@ -1488,20 +2259,18 @@ const togglePlaceNamesBtn = document.getElementById('togglePlaceNamesBtn');
 if (togglePlaceNamesBtn) {
   togglePlaceNamesBtn.addEventListener('click', () => {
     placeNamesEnabled = !placeNamesEnabled;
-    togglePlaceNamesBtn.classList.toggle('active', placeNamesEnabled);
-    togglePlaceNamesBtn.setAttribute('aria-pressed', String(placeNamesEnabled));
+    updateLayerToggle(togglePlaceNamesBtn, placeNamesEnabled);
     const status = document.getElementById('placesStatus');
 
     if (placeNamesEnabled) {
-      placeNamesLayerGroup.addTo(map);
       lastPlaceNamesBounds = '';
       scheduleNASAPlaceNameRefresh();
     } else {
       if (placeNamesRequest) placeNamesRequest.abort();
       clearPlaceNameLayers();
-      map.removeLayer(placeNamesLayerGroup);
       if (status) status.textContent = 'Place names hidden';
     }
+    applyMapLayersForView(currentAppView);
   });
 }
 
@@ -1510,10 +2279,97 @@ const sidebarToggle = document.getElementById('sidebarToggle');
 const navSidebar = document.getElementById('navSidebar');
 if (sidebarToggle && navSidebar) {
   sidebarToggle.addEventListener('click', () => {
-    navSidebar.classList.toggle('collapsed');
-    sidebarToggle.innerText = navSidebar.classList.contains('collapsed') ? '▶' : '◀';
+    navigateToAppView(currentAppView === 'map' ? 'planner' : 'map');
   });
 }
+
+function setActiveAppView(view) {
+  currentAppView = view;
+  document.body.dataset.appView = view;
+  document.querySelectorAll('.app-nav-link').forEach((button) => {
+    const isActive = button.dataset.appView === view;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-current', isActive ? 'page' : 'false');
+  });
+}
+
+const APP_VIEW_SECTIONS = {
+  map: [],
+  planner: ['routeSummarySection', 'routeStepsSection'],
+  telemetry: ['telemetrySection'],
+  layers: ['layerSection'],
+  hazards: ['hazardSection']
+};
+
+function updateSidebarForView(view) {
+  const sidebarHeader = navSidebar?.querySelector('.nav-sidebar-header');
+  const sidebarBody = navSidebar?.querySelector('.nav-sidebar-body');
+  const visibleSections = new Set(APP_VIEW_SECTIONS[view] || []);
+  const isMapView = view === 'map';
+
+  if (navSidebar) {
+    navSidebar.classList.toggle('collapsed', isMapView);
+  }
+  if (sidebarHeader) sidebarHeader.hidden = view !== 'planner';
+  if (sidebarBody) {
+    Array.from(sidebarBody.children).forEach((section) => {
+      section.hidden = !visibleSections.has(section.id);
+    });
+    sidebarBody.scrollTo({ top: 0, behavior: 'auto' });
+  }
+  if (sidebarToggle) {
+    sidebarToggle.hidden = !['map', 'planner'].includes(view);
+    sidebarToggle.innerText = isMapView ? '▶' : '◀';
+  }
+}
+
+function showAppView(view) {
+  if (!Object.prototype.hasOwnProperty.call(APP_VIEW_SECTIONS, view)) return;
+
+  const previousView = currentAppView;
+  if (view === 'layers' && previousView !== 'layers' && placeNamesEnabled) {
+    clearPlaceNameLayers();
+  }
+
+  setActiveAppView(view);
+  updateSidebarForView(view);
+
+  if (view !== 'planner') {
+    stopNavigationSimulation();
+    cancelMapPointSelection();
+  }
+
+  applyMapLayersForView(view);
+
+  if (view === 'planner' && currentRouteLine) {
+    map.fitBounds(currentRouteLine.getBounds(), {
+      paddingTopLeft: [420, 60],
+      paddingBottomRight: [60, 60]
+    });
+  }
+
+  if (view === 'layers' && placeNamesEnabled) {
+    lastPlaceNamesBounds = '';
+    scheduleNASAPlaceNameRefresh();
+  } else if (view !== 'layers') {
+    clearTimeout(placeNamesRefreshTimer);
+    if (placeNamesRequest) {
+      placeNamesRequest.abort();
+      placeNamesRequest = null;
+    }
+    lastPlaceNamesBounds = '';
+  }
+
+  map.invalidateSize();
+}
+
+function navigateToAppView(view) {
+  showAppView(view);
+}
+
+document.querySelectorAll('button[data-app-view]').forEach((button) => {
+  button.addEventListener('click', () => navigateToAppView(button.dataset.appView));
+});
 
 // Live Cursor Coordinates Tracker
 const cursorCoords = document.getElementById('cursorCoords');
@@ -1526,5 +2382,9 @@ map.on('mousemove', (e) => {
 });
 
 map.on('moveend zoomend', scheduleNASAPlaceNameRefresh);
+updateLayerToggle(toggleMolaBtn, molaLayerEnabled);
+updateLayerToggle(toggleHazardsBtn, hazardsLayerEnabled);
+updateLayerToggle(togglePlaceNamesBtn, placeNamesEnabled);
+showAppView('planner');
 scheduleNASAPlaceNameRefresh();
 loadMissionRoute();

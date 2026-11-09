@@ -1,6 +1,6 @@
 # Mars Navigator
 
-Mars Navigator is a web application for viewing simulated EVA routes, hazards, suit telemetry, and named surface features at selected Mars sites. The map uses NASA/JPL Mars Trek's Viking MDIM 2.1 global color mosaic, rendered through its official ArcGIS ImageServer. Place names and available feature details are loaded from NASA Mars Trek's public map services for the visible area. The API serves mission-planning data from a local JSON file.
+Mars Navigator is a web application for viewing simulated EVA routes, hazards, suit telemetry, and named surface features on an interactive 3D Mars globe. CesiumJS renders NASA/JPL Mars Trek's Viking MDIM 2.1 global color mosaic on a Mars-sized ellipsoid. An optional MOLA/HRSC color-shaded relief image layer can be switched on or off from the sidebar; place names, route lines, and hazards are rendered on the same globe. Place names and available feature details are loaded from NASA Mars Trek's public map services for the visible area. The API serves mission-planning data from a local JSON file.
 
 ## Project structure
 
