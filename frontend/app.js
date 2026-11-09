@@ -329,18 +329,18 @@ function getOverlayPropertyValue(property, time) {
   return property?.getValue ? property.getValue(time) : property;
 }
 
-function getOverlayNode(entity, type) {
+function getOverlayNode(entity) {
   let overlay = marsOverlayNodes.get(entity.id);
-  if (overlay?.type === type) return overlay.element;
+  if (overlay?.type === 'circle') return overlay.element;
   overlay?.element.remove();
 
   const element = document.createElementNS(
     'http://www.w3.org/2000/svg',
-    type === 'path' ? 'path' : 'circle'
+    'circle'
   );
-  element.setAttribute('class', `mars-globe-overlay-${type}`);
+  element.setAttribute('class', 'mars-globe-overlay-circle');
   marsOverlayGraphics.append(element);
-  marsOverlayNodes.set(entity.id, { type, element });
+  marsOverlayNodes.set(entity.id, { type: 'circle', element });
   return element;
 }
 
@@ -381,52 +381,6 @@ function getOverlayLabelNode(entity) {
   return element;
 }
 
-function projectMarsPolyline(positions, occluder) {
-  if (positions.length < 2) return '';
-  let path = '';
-  let drawing = false;
-
-  for (let segment = 0; segment < positions.length - 1; segment += 1) {
-    const start = Cesium.Cartographic.fromCartesian(
-      positions[segment],
-      MARS_ELLIPSOID
-    );
-    const end = Cesium.Cartographic.fromCartesian(
-      positions[segment + 1],
-      MARS_ELLIPSOID
-    );
-    const geodesic = new Cesium.EllipsoidGeodesic(
-      start,
-      end,
-      MARS_ELLIPSOID
-    );
-    const steps = Math.max(2, Math.ceil(geodesic.surfaceDistance / 50000));
-
-    for (let step = 0; step <= steps; step += 1) {
-      const cartographic = geodesic.interpolateUsingFraction(step / steps);
-      const position = Cesium.Cartesian3.fromRadians(
-        cartographic.longitude,
-        cartographic.latitude,
-        1500,
-        MARS_ELLIPSOID
-      );
-      const screen = occluder.isPointVisible(position)
-        ? viewer.scene.cartesianToCanvasCoordinates(position)
-        : null;
-
-      if (!screen) {
-        drawing = false;
-        continue;
-      }
-
-      path += `${drawing ? 'L' : 'M'}${screen.x.toFixed(1)},${screen.y.toFixed(1)}`;
-      drawing = true;
-    }
-  }
-
-  return path;
-}
-
 function renderMarsEntityOverlay() {
   const time = viewer.clock.currentTime;
   const occluder = new Cesium.EllipsoidalOccluder(
@@ -436,28 +390,11 @@ function renderMarsEntityOverlay() {
   const activeIds = new Set();
   const canvasWidth = viewer.canvas.clientWidth;
   const canvasHeight = viewer.canvas.clientHeight;
+  const occupiedCuriosityLabels = [];
 
   viewer.entities.values.forEach((entity) => {
     if (!entity.show) return;
-    const polyline = entity.polyline;
     const ellipse = entity.ellipse;
-
-    if (polyline) {
-      const positions = getOverlayPropertyValue(polyline.positions, time) || [];
-      const path = getOverlayNode(entity, 'path');
-      const material = getOverlayPropertyValue(polyline.material, time);
-      path.setAttribute('d', projectMarsPolyline(positions, occluder));
-      path.setAttribute(
-        'stroke',
-        material?.color?.toCssColorString?.() || '#60a5fa'
-      );
-      path.setAttribute(
-        'stroke-width',
-        String(getOverlayPropertyValue(polyline.width, time) || 4)
-      );
-      activeIds.add(entity.id);
-      return;
-    }
 
     const position = entity.position?.getValue(time);
     if (!position) return;
@@ -475,7 +412,7 @@ function renderMarsEntityOverlay() {
     }
 
     if (ellipse) {
-      const circle = getOverlayNode(entity, 'circle');
+      const circle = getOverlayNode(entity);
       const radius = getOverlayPropertyValue(ellipse.semiMajorAxis, time) || 600;
       const fieldOfView = viewer.camera.frustum.fovy || Math.PI / 3;
       const radiusPixels = Math.max(
@@ -503,9 +440,50 @@ function renderMarsEntityOverlay() {
     labelNode.setAttribute('aria-label', text);
     labelNode.style.left = `${screen.x}px`;
     labelNode.style.top = `${screen.y}px`;
+    labelNode.style.display = '';
 
-    const pixelOffset =
+    let pixelOffset =
       getOverlayPropertyValue(label.pixelOffset, time) || Cesium.Cartesian2.ZERO;
+    let horizontalOrigin = getOverlayPropertyValue(label.horizontalOrigin, time);
+    let verticalOrigin = getOverlayPropertyValue(label.verticalOrigin, time);
+    if (entity.isCuriosityWaypoint) {
+      const labelWidth = Math.min(280, Math.max(70, text.length * 7));
+      const placement = findLabelPlacement(
+        screen,
+        labelWidth,
+        occupiedCuriosityLabels,
+        { x: canvasWidth, y: canvasHeight }
+      );
+      if (!placement) {
+        labelNode.style.display = 'none';
+        activeIds.add(entity.id);
+        return;
+      }
+      occupiedCuriosityLabels.push(placement.box);
+      const offsets = {
+        right: {
+          horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          pixelOffset: new Cesium.Cartesian2(10, 0)
+        },
+        left: {
+          horizontalOrigin: Cesium.HorizontalOrigin.RIGHT,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          pixelOffset: new Cesium.Cartesian2(-10, 0)
+        },
+        top: {
+          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          pixelOffset: new Cesium.Cartesian2(0, -12)
+        },
+        bottom: {
+          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+          verticalOrigin: Cesium.VerticalOrigin.TOP,
+          pixelOffset: new Cesium.Cartesian2(0, 12)
+        }
+      };
+      ({ horizontalOrigin, verticalOrigin, pixelOffset } = offsets[placement.direction]);
+    }
     labelNode.style.marginLeft = `${pixelOffset.x}px`;
     labelNode.style.marginTop = `${pixelOffset.y}px`;
 
@@ -525,8 +503,6 @@ function renderMarsEntityOverlay() {
       labelNode.style.setProperty('--mars-marker-size', `${pointSize}px`);
     }
 
-    const horizontalOrigin = getOverlayPropertyValue(label.horizontalOrigin, time);
-    const verticalOrigin = getOverlayPropertyValue(label.verticalOrigin, time);
     labelNode.dataset.horizontalOrigin =
       horizontalOrigin === Cesium.HorizontalOrigin.LEFT
         ? 'left'
@@ -666,6 +642,7 @@ const curiosityHiRISEImagery = createMarsTrekImagery(
     maximumLevel: 19
   }
 );
+curiosityHiRISEImagery.show = false;
 const insightCTXImagery = createMarsTrekImagery(
   'https://trek.nasa.gov/mars/trekarcgis/rest/services/InSightCTXMosaic_112917_gcs/ImageServer/exportImage',
   'InSight CTX surface mosaic',
@@ -681,10 +658,15 @@ const insightCTXImagery = createMarsTrekImagery(
     maximumLevel: 19
   }
 );
+insightCTXImagery.show = false;
+// Optional image overlays stay hidden until the user turns them on.
+molaElevationOverlay.show = false;
 const hazardLayerGroup = new GlobeLayerGroup();
 const routeLayerGroup = new GlobeLayerGroup();
 const poiLayerGroup = new GlobeLayerGroup();
 const placeNamesLayerGroup = new GlobeLayerGroup();
+const curiosityTraverseLayerGroup = new GlobeLayerGroup();
+const curiosityWaypointLayerGroup = new GlobeLayerGroup();
 
 const themeToggleBtn = document.getElementById('themeToggleBtn');
 const APP_THEME_STORAGE_KEY = 'ares-nav-theme';
@@ -747,13 +729,19 @@ const NASA_PLACE_LAYERS = [
     hasGeometry: false
   }
 ];
-let placeNamesEnabled = true;
-let molaLayerEnabled = true;
-let hazardsLayerEnabled = true;
+let placeNamesEnabled = false;
+let molaLayerEnabled = false;
+let hazardsLayerEnabled = false;
+let curiosityImageryEnabled = false;
+let curiosityRoverEnabled = false;
+let insightImageryEnabled = false;
 let currentAppView = 'planner';
 let placeNamesRequest = null;
 let placeNamesRefreshTimer = null;
 let lastPlaceNamesBounds = '';
+let curiosityDataLoaded = false;
+let curiosityDataRequest = null;
+let curiosityWaypointCount = 0;
 const LOCAL_BACKEND_PORTS = ['3000', '5500', '3001', '3002', '5050', '8080'];
 
 // The terrain legend follows the same toggle as the NASA MOLA overlay.
@@ -1328,6 +1316,192 @@ function createMapPopup(title, rows) {
   popup.append(heading);
   rows.forEach(([label, value]) => addPlacePopupRow(popup, label, String(value)));
   return popup;
+}
+
+function createCuriosityWaypointPopup(waypoint) {
+  const popup = createMapPopup(waypoint.name, [
+    [
+      'Coordinates',
+      `${Math.abs(waypoint.latitude).toFixed(4)}° ${waypoint.latitude < 0 ? 'S' : 'N'}, ${Math.abs(waypoint.longitude).toFixed(4)}° ${waypoint.longitude < 0 ? 'W' : 'E'}`
+    ],
+    ['Data source', 'NASA Mars Trek Curiosity waypoint layer']
+  ]);
+  if (!waypoint.sourceUrl) return popup;
+
+  const sourceUrl = new URL(waypoint.sourceUrl);
+  if (
+    sourceUrl.protocol !== 'https:' ||
+    sourceUrl.hostname !== 'trek.nasa.gov' ||
+    !sourceUrl.pathname.startsWith('/mars/jpl/assets/features/curiosity/')
+  ) {
+    return popup;
+  }
+  const link = document.createElement('a');
+  link.href = sourceUrl.href;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.textContent = 'Open this Curiosity stop in NASA Mars Trek';
+  popup.append(link);
+  return popup;
+}
+
+function focusCuriosityWaypoint(waypoint) {
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(
+      waypoint.longitude,
+      waypoint.latitude,
+      12000,
+      MARS_ELLIPSOID
+    ),
+    orientation: {
+      heading: viewer.camera.heading,
+      pitch: -Math.PI / 2,
+      roll: 0
+    },
+    duration: 1,
+    complete: () => {
+      showMapPopup(
+        createCuriosityWaypointPopup(waypoint),
+        new Cesium.Cartesian2(
+          viewer.canvas.clientWidth / 2,
+          viewer.canvas.clientHeight / 2
+        )
+      );
+    }
+  });
+}
+
+function populateCuriosityWaypointList(waypoints) {
+  const details = document.getElementById('curiosityStopsDetails');
+  const list = document.getElementById('curiosityWaypointList');
+  if (!details || !list) return;
+
+  list.replaceChildren();
+  waypoints.forEach((waypoint) => {
+    const button = document.createElement('button');
+    const latitude = `${Math.abs(waypoint.latitude).toFixed(4)}° ${waypoint.latitude < 0 ? 'S' : 'N'}`;
+    const longitude = `${Math.abs(waypoint.longitude).toFixed(4)}° ${waypoint.longitude < 0 ? 'W' : 'E'}`;
+    button.type = 'button';
+    button.textContent = `${waypoint.name} · ${latitude}, ${longitude}`;
+    button.addEventListener('click', () => focusCuriosityWaypoint(waypoint));
+    list.append(button);
+  });
+  details.hidden = waypoints.length === 0;
+}
+
+async function fetchCuriosityLayersFromApi() {
+  const apiUrls = [];
+  if (window.location.protocol !== 'file:') {
+    apiUrls.push(new URL('/api/curiosity', window.location.origin));
+  }
+  if (
+    window.location.protocol === 'file:' ||
+    ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+  ) {
+    const host =
+      window.location.protocol === 'file:'
+        ? 'localhost'
+        : window.location.hostname;
+    const ports = new Set([window.location.port, ...LOCAL_BACKEND_PORTS]);
+    for (const port of ports) {
+      if (port) apiUrls.push(new URL('/api/curiosity', `http://${host}:${port}`));
+    }
+  }
+
+  const failures = [];
+  for (const apiUrl of apiUrls) {
+    try {
+      const response = await fetch(apiUrl, {
+        signal: AbortSignal.timeout(20000)
+      });
+      if (!response.ok) {
+        failures.push(`HTTP ${response.status} from ${apiUrl.origin}`);
+        continue;
+      }
+      const result = await response.json();
+      if (result.success && Array.isArray(result.traverse) && Array.isArray(result.waypoints)) {
+        return result;
+      }
+      failures.push(result.message || `Invalid response from ${apiUrl.origin}`);
+    } catch (error) {
+      if (error.name === 'AbortError' || error.name === 'TimeoutError') throw error;
+      failures.push(`${apiUrl.origin}: ${error.message}`);
+    }
+  }
+  throw new Error(
+    failures.length
+      ? `NASA Curiosity data could not be loaded (${failures.join('; ')}).`
+      : 'NASA Curiosity data is unavailable from this page.'
+  );
+}
+
+async function loadCuriosityRoverData() {
+  if (curiosityDataLoaded) return curiosityWaypointCount;
+  if (!curiosityDataRequest) {
+    curiosityDataRequest = (async () => {
+      const data = await fetchCuriosityLayersFromApi();
+      populateCuriosityWaypointList(data.waypoints);
+      data.traverse.forEach((coordinates, pathIndex) => {
+        const positions = coordinates.map(([longitude, latitude]) =>
+          Cesium.Cartesian3.fromDegrees(longitude, latitude, 0, MARS_ELLIPSOID)
+        );
+        const entity = viewer.entities.add({
+          polyline: {
+            positions,
+            width: 3,
+            material: Cesium.Color.fromCssColorString('#33e0c1')
+          }
+        });
+        entity.mapPopup = createMapPopup('Curiosity recorded traverse', [
+          ['Path', `NASA Mars Trek Curiosity route segment ${pathIndex + 1}`],
+          ['Data source', 'NASA Mars Trek curiosity_path layer'],
+          ['Rover status', 'Recorded route, not a live position']
+        ]);
+        curiosityTraverseLayerGroup.addLayer(entity);
+      });
+
+      data.waypoints.forEach((waypoint) => {
+        const entity = viewer.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(
+            waypoint.longitude,
+            waypoint.latitude,
+            0,
+            MARS_ELLIPSOID
+          ),
+          point: {
+            pixelSize: 8,
+            color: Cesium.Color.fromCssColorString('#ffcf5c'),
+            outlineColor: Cesium.Color.fromCssColorString('#19202d'),
+            outlineWidth: 2,
+            disableDepthTestDistance: 0
+          },
+          label: {
+            text: waypoint.name,
+            font: '11px Roboto, sans-serif',
+            fillColor: Cesium.Color.WHITE,
+            outlineColor: Cesium.Color.fromCssColorString('#111827'),
+            outlineWidth: 3,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            showBackground: true,
+            backgroundColor: Cesium.Color.fromCssColorString('#101827').withAlpha(0.9),
+            pixelOffset: new Cesium.Cartesian2(0, -13),
+            horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+            disableDepthTestDistance: 0
+          }
+        });
+        entity.isCuriosityWaypoint = true;
+        entity.mapPopup = createCuriosityWaypointPopup(waypoint);
+        curiosityWaypointLayerGroup.addLayer(entity);
+      });
+      curiosityDataLoaded = true;
+      curiosityWaypointCount = data.waypoints.length;
+      return curiosityWaypointCount;
+    })().finally(() => {
+      curiosityDataRequest = null;
+    });
+  }
+  return curiosityDataRequest;
 }
 
 function clearPlaceNameLayers() {
@@ -2212,15 +2386,23 @@ function setMapLayerVisible(layer, visible) {
 
 function applyMapLayersForView(view = currentAppView) {
   const showRoute = view === 'map' || view === 'planner';
-  const showHazards = hazardsLayerEnabled && (view === 'hazards' || view === 'layers');
+  const showHazards =
+    view === 'hazards' || (hazardsLayerEnabled && view === 'layers');
   const showMola = view === 'layers' && molaLayerEnabled;
   const showPlaceNames = view === 'layers' && placeNamesEnabled;
+  const showCuriosityImagery = view === 'layers' && curiosityImageryEnabled;
+  const showCuriosityRover = view === 'layers' && curiosityRoverEnabled;
+  const showInsightImagery = view === 'layers' && insightImageryEnabled;
 
   setMapLayerVisible(routeLayerGroup, showRoute);
   setMapLayerVisible(poiLayerGroup, showRoute);
   setMapLayerVisible(hazardLayerGroup, showHazards);
   setMapLayerVisible(molaElevationOverlay, showMola);
   setMapLayerVisible(placeNamesLayerGroup, showPlaceNames);
+  setMapLayerVisible(curiosityHiRISEImagery, showCuriosityImagery);
+  setMapLayerVisible(curiosityTraverseLayerGroup, showCuriosityRover);
+  setMapLayerVisible(curiosityWaypointLayerGroup, showCuriosityRover);
+  setMapLayerVisible(insightCTXImagery, showInsightImagery);
 
   if (showMola && !molaLegendVisible) {
     molaLegend.addTo(map);
@@ -2275,6 +2457,73 @@ if (togglePlaceNamesBtn) {
     applyMapLayersForView(currentAppView);
   });
 }
+
+const toggleCuriosityImageryBtn = document.getElementById(
+  'toggleCuriosityImageryBtn'
+);
+toggleCuriosityImageryBtn?.addEventListener('click', () => {
+  curiosityImageryEnabled = !curiosityImageryEnabled;
+  updateLayerToggle(toggleCuriosityImageryBtn, curiosityImageryEnabled);
+  applyMapLayersForView(currentAppView);
+});
+
+const toggleCuriosityRoverBtn = document.getElementById(
+  'toggleCuriosityRoverBtn'
+);
+toggleCuriosityRoverBtn?.addEventListener('click', async () => {
+  curiosityRoverEnabled = !curiosityRoverEnabled;
+  updateLayerToggle(toggleCuriosityRoverBtn, curiosityRoverEnabled);
+  applyMapLayersForView(currentAppView);
+  const status = document.getElementById('curiosityLayerStatus');
+
+  if (!curiosityRoverEnabled) {
+    if (status && !curiosityDataLoaded) status.textContent = '';
+    return;
+  }
+
+  if (status) status.textContent = 'Loading Curiosity rover data from NASA Mars Trek…';
+  try {
+    const waypointCount = await loadCuriosityRoverData();
+    if (status) {
+      status.textContent = `NASA Mars Trek data loaded: recorded rover path and ${waypointCount} named stops.`;
+    }
+    applyMapLayersForView(currentAppView);
+  } catch (error) {
+    curiosityRoverEnabled = false;
+    updateLayerToggle(toggleCuriosityRoverBtn, false);
+    applyMapLayersForView(currentAppView);
+    if (status) {
+      status.textContent = 'Curiosity rover layers could not be loaded. Check your connection and try again.';
+    }
+    console.error('Unable to load NASA Mars Trek Curiosity rover layers:', error);
+  }
+});
+
+const toggleInsightImageryBtn = document.getElementById(
+  'toggleInsightImageryBtn'
+);
+toggleInsightImageryBtn?.addEventListener('click', () => {
+  insightImageryEnabled = !insightImageryEnabled;
+  updateLayerToggle(toggleInsightImageryBtn, insightImageryEnabled);
+  applyMapLayersForView(currentAppView);
+});
+
+document.getElementById('focusCuriosityBtn')?.addEventListener('click', () => {
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(
+      137.4,
+      -4.65,
+      50000,
+      MARS_ELLIPSOID
+    ),
+    orientation: {
+      heading: viewer.camera.heading,
+      pitch: -Math.PI / 2,
+      roll: 0
+    },
+    duration: 1.2
+  });
+});
 
 // Collapsible Sidebar Drawer Toggle
 const sidebarToggle = document.getElementById('sidebarToggle');
@@ -2387,6 +2636,9 @@ map.on('moveend zoomend', scheduleNASAPlaceNameRefresh);
 updateLayerToggle(toggleMolaBtn, molaLayerEnabled);
 updateLayerToggle(toggleHazardsBtn, hazardsLayerEnabled);
 updateLayerToggle(togglePlaceNamesBtn, placeNamesEnabled);
+updateLayerToggle(toggleCuriosityImageryBtn, curiosityImageryEnabled);
+updateLayerToggle(toggleCuriosityRoverBtn, curiosityRoverEnabled);
+updateLayerToggle(toggleInsightImageryBtn, insightImageryEnabled);
 showAppView('planner');
 scheduleNASAPlaceNameRefresh();
 loadMissionRoute();

@@ -40,7 +40,7 @@ explanations to documentation rather than comments inside that file.
   global image is about 232 metres per pixel, so it cannot show fine surface
   details everywhere, no matter how far the camera zooms.
 - Higher-resolution Mars Trek imagery is loaded over its actual coverage areas
-  when zooming in: the
+  when its layer is enabled and the map is zoomed in: the
   [Curiosity HiRISE mosaic](https://trek.nasa.gov/mars/trekarcgis/rest/services/curiosity_hirise_mosaic/ImageServer)
   covers part of Gale Crater at about 0.25 metres per pixel, and the
   [InSight CTX mosaic](https://trek.nasa.gov/mars/trekarcgis/rest/services/InSightCTXMosaic_112917_gcs/ImageServer)
@@ -48,7 +48,25 @@ explanations to documentation rather than comments inside that file.
   image layers are clipped to their published extents; the global Viking map
   remains visible elsewhere.
   All image layers request finer tiles as the camera zooms in, up to the
-  maximum level supported for that source.
+  maximum level supported for that source. Optional layers start off; turn on
+  each desired overlay individually in the Layers view.
+
+### Curiosity rover information
+
+The Layers view can show Curiosity's high-resolution Gale Crater image and its
+recorded traverse and named stops. The rover layer is loaded from NASA Mars
+Trek's public ArcGIS feature services:
+
+- [Curiosity traverse path](https://trek.nasa.gov/mars/trekarcgis/rest/services/curiosity_path/MapServer/0)
+  supplies the recorded route.
+- [Curiosity waypoint layer](https://trek.nasa.gov/mars/trekarcgis/rest/services/curiosity_waypoints/MapServer/0)
+  supplies named stops, coordinates, and links to the corresponding NASA Mars
+  Trek feature pages.
+
+The path and waypoint records are map data, not a live rover location feed.
+Click a named stop for its coordinates and NASA Mars Trek source page, or use
+**Go to Gale Crater** to move the map to the rover's region.
+
 ### Place names and feature information
 
 Place labels and their map popups are loaded for the visible map area from

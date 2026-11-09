@@ -816,6 +816,68 @@ body[data-app-view="hazards"] .nav-sidebar-body {
   font-size: 0.68rem;
 }
 
+.curiosity-layer-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.curiosity-layer-info h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.78rem;
+}
+
+.curiosity-layer-info p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.curiosity-layer-info .pick-map-btn {
+  align-self: flex-start;
+}
+
+.curiosity-layer-info details {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+.curiosity-layer-info summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.curiosity-waypoint-list {
+  display: grid;
+  gap: 4px;
+  max-height: 220px;
+  overflow: auto;
+  margin-top: 6px;
+}
+
+.curiosity-waypoint-list button {
+  width: 100%;
+  padding: 5px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.06);
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.curiosity-waypoint-list button:hover {
+  color: var(--text-primary);
+  background: rgba(66, 133, 244, 0.14);
+}
+
 /* Gauges Grid */
 .gauges-grid {
   display: grid;
@@ -3913,13 +3975,6 @@ html[data-theme="dark"] .mars-place-label-elevation {
 
 .mars-globe-entity-overlay {
   z-index: 3;
-}
-
-.mars-globe-overlay-path {
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  pointer-events: none;
 }
 
 .mars-globe-overlay-circle {

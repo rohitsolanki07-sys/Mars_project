@@ -5,6 +5,7 @@ const cors = require('cors');
 const fs = require('fs');
 const { exec } = require('child_process');
 const marsPlacesService = require('./Services/MarsPlacesService');
+const marsRoverService = require('./Services/MarsRoverService');
 
 // Create the web server and choose a preferred port. If that port is busy,
 // the server will try the other common development ports listed below.
@@ -194,6 +195,21 @@ app.get('/api/places', async (req, res) => {
     return res.status(502).json({
       success: false,
       message: 'NASA Mars Trek place names are temporarily unavailable.'
+    });
+  }
+});
+
+// Return Curiosity's recorded traverse and named stops from NASA Mars Trek.
+app.get('/api/curiosity', async (req, res) => {
+  try {
+    const result = await marsRoverService.getCuriosityLayers();
+    res.set('Cache-Control', 'public, max-age=3600');
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('ERROR loading NASA Curiosity rover layers:', err.message);
+    return res.status(502).json({
+      success: false,
+      message: 'NASA Mars Trek Curiosity data is temporarily unavailable.'
     });
   }
 });

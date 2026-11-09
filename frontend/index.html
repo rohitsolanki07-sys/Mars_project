@@ -189,44 +189,93 @@
         <div class="section-title">MAP LAYERS</div>
         <button
           type="button"
-          class="sidebar-layer-toggle active"
+          class="sidebar-layer-toggle"
           id="toggleMolaBtn"
-          aria-pressed="true"
+          aria-pressed="false"
           title="Toggle NASA Mars Trek MOLA color-shaded terrain"
         >
           <span class="sidebar-layer-name">
             <span aria-hidden="true">🌋</span>
             <span>MOLA color-shaded terrain</span>
           </span>
-          <span class="sidebar-layer-state" aria-hidden="true">On</span>
+          <span class="sidebar-layer-state" aria-hidden="true">Off</span>
         </button>
         <button
           type="button"
-          class="sidebar-layer-toggle active"
+          class="sidebar-layer-toggle"
           id="toggleHazardsBtn"
-          aria-pressed="true"
+          aria-pressed="false"
           title="Toggle terrain hazard zones"
         >
           <span class="sidebar-layer-name">
             <span aria-hidden="true">⚠️</span>
             <span>Hazard zones</span>
           </span>
-          <span class="sidebar-layer-state" aria-hidden="true">On</span>
+          <span class="sidebar-layer-state" aria-hidden="true">Off</span>
         </button>
         <button
           type="button"
-          class="sidebar-layer-toggle active"
+          class="sidebar-layer-toggle"
           id="togglePlaceNamesBtn"
-          aria-pressed="true"
+          aria-pressed="false"
           title="Toggle NASA Mars place names"
         >
           <span class="sidebar-layer-name">
             <span aria-hidden="true">🏷️</span>
             <span>NASA place names</span>
           </span>
-          <span class="sidebar-layer-state" aria-hidden="true">On</span>
+          <span class="sidebar-layer-state" aria-hidden="true">Off</span>
         </button>
-        <p class="sidebar-layer-description">NASA Mars Trek elevation and shaded relief</p>
+        <button
+          type="button"
+          class="sidebar-layer-toggle"
+          id="toggleCuriosityImageryBtn"
+          aria-pressed="false"
+          title="Toggle the NASA Mars Trek Curiosity HiRISE surface image"
+        >
+          <span class="sidebar-layer-name">
+            <span aria-hidden="true">🛰️</span>
+            <span>Curiosity HiRISE image</span>
+          </span>
+          <span class="sidebar-layer-state" aria-hidden="true">Off</span>
+        </button>
+        <button
+          type="button"
+          class="sidebar-layer-toggle"
+          id="toggleCuriosityRoverBtn"
+          aria-pressed="false"
+          title="Toggle Curiosity's recorded traverse and named stops from NASA Mars Trek"
+        >
+          <span class="sidebar-layer-name">
+            <span aria-hidden="true">🤖</span>
+            <span>Curiosity traverse &amp; stops</span>
+          </span>
+          <span class="sidebar-layer-state" aria-hidden="true">Off</span>
+        </button>
+        <button
+          type="button"
+          class="sidebar-layer-toggle"
+          id="toggleInsightImageryBtn"
+          aria-pressed="false"
+          title="Toggle the NASA Mars Trek InSight CTX surface image"
+        >
+          <span class="sidebar-layer-name">
+            <span aria-hidden="true">🪐</span>
+            <span>InSight CTX image</span>
+          </span>
+          <span class="sidebar-layer-state" aria-hidden="true">Off</span>
+        </button>
+        <div class="curiosity-layer-info">
+          <h3>Curiosity at Gale Crater</h3>
+          <p>Show NASA Mars Trek's surface image, recorded rover path, and named stops. This is historical map data, not a live rover position.</p>
+          <button type="button" class="pick-map-btn" id="focusCuriosityBtn">Go to Gale Crater</button>
+          <details id="curiosityStopsDetails" hidden>
+            <summary>Browse named rover stops</summary>
+            <div id="curiosityWaypointList" class="curiosity-waypoint-list"></div>
+          </details>
+          <p id="curiosityLayerStatus" class="map-pick-status" role="status" aria-live="polite"></p>
+        </div>
+        <p class="sidebar-layer-description">Choose layers one at a time. All optional layers start off.</p>
       </div>
 
       <!-- Primary Route ETA Card (Google Maps style) -->
