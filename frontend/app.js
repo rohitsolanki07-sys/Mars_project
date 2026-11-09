@@ -11,6 +11,8 @@ const viewer = new Cesium.Viewer('map', {
   sceneModePicker: false,
   selectionIndicator: false,
   timeline: false,
+  // Cesium also uses the scene ellipsoid to calculate globe drag sensitivity.
+  ellipsoid: MARS_ELLIPSOID,
   globe: new Cesium.Globe(MARS_ELLIPSOID),
   mapProjection: new Cesium.GeographicProjection(MARS_ELLIPSOID),
   terrainProvider: new Cesium.EllipsoidTerrainProvider({
@@ -20,7 +22,7 @@ const viewer = new Cesium.Viewer('map', {
 
 viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#100d0d');
 viewer.scene.globe.showGroundAtmosphere = false;
-viewer.scene.skyAtmosphere.show = false;
+if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
 viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#060914');
 const marsCameraController = viewer.scene.screenSpaceCameraController;
 // Mars Trek imagery uses an ellipsoid (no detailed terrain), so allow the
