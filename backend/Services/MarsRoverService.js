@@ -2,6 +2,10 @@ const NASA_MARS_ARCGIS =
   'https://trek.nasa.gov/mars/trekarcgis/rest/services';
 const CURIOSITY_PATH_LAYER = 'curiosity_path/MapServer/0';
 const CURIOSITY_WAYPOINT_LAYER = 'curiosity_waypoints/MapServer/0';
+const PERSEVERANCE_PATH_LAYER = 'Perseverance_Traverse_Path/MapServer/0';
+const PERSEVERANCE_WAYPOINT_LAYER = 'mars2020_waypoints/MapServer/0';
+const PERSEVERANCE_LANDING_ELLIPSE_LAYER =
+  'perseverance_landing_ellipse/MapServer/0';
 const MAX_PATH_VERTICES = 1800;
 
 function isValidCoordinate(coordinate) {
@@ -99,4 +103,69 @@ async function getCuriosityLayers() {
   return { traverse, waypoints };
 }
 
-module.exports = { getCuriosityLayers };
+function normalizePath(coordinates) {
+  return simplifyPath(coordinates)
+    .map(([longitude, latitude]) => [Number(longitude), Number(latitude)]);
+}
+
+function getPerseveranceWaypoint(feature) {
+  const name = String(feature.properties?.name || '').trim();
+  const coordinate = feature.geometry?.coordinates;
+  if (!name || !isValidCoordinate(coordinate)) return null;
+
+  let sourceUrl = '';
+  const template = String(feature.properties?.template || '');
+  if (template) {
+    const candidate = new URL(template, 'https://trek.nasa.gov');
+    if (
+      candidate.protocol === 'https:' &&
+      candidate.hostname === 'trek.nasa.gov' &&
+      candidate.pathname.startsWith('/assets/bookmarks/mars/perseverance/')
+    ) {
+      sourceUrl = candidate.href;
+    }
+  }
+
+  return {
+    name,
+    longitude: Number(coordinate[0]),
+    latitude: Number(coordinate[1]),
+    sourceUrl
+  };
+}
+
+async function getPerseveranceLayers() {
+  const [pathFeatures, waypointFeatures, landingEllipseFeatures] =
+    await Promise.all([
+      fetchFeatureLayer(PERSEVERANCE_PATH_LAYER),
+      fetchFeatureLayer(PERSEVERANCE_WAYPOINT_LAYER),
+      fetchFeatureLayer(PERSEVERANCE_LANDING_ELLIPSE_LAYER)
+    ]);
+
+  const traverse = pathFeatures
+    .flatMap((feature) => {
+      const geometry = feature.geometry;
+      if (geometry?.type === 'LineString') return [geometry.coordinates];
+      if (geometry?.type === 'MultiLineString') return geometry.coordinates;
+      return [];
+    })
+    .map(normalizePath)
+    .filter((coordinates) => coordinates.length > 1);
+  const waypoints = waypointFeatures
+    .map(getPerseveranceWaypoint)
+    .filter(Boolean);
+  const landingEllipse = landingEllipseFeatures
+    .flatMap((feature) =>
+      feature.geometry?.type === 'Polygon' ? feature.geometry.coordinates : []
+    )
+    .map(normalizePath)
+    .filter((ring) => ring.length > 3);
+
+  if (traverse.length === 0 || waypoints.length === 0 || landingEllipse.length === 0) {
+    throw new Error('NASA Mars Trek returned incomplete Perseverance rover data.');
+  }
+
+  return { traverse, waypoints, landingEllipse };
+}
+
+module.exports = { getCuriosityLayers, getPerseveranceLayers };

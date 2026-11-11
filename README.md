@@ -1,6 +1,6 @@
 # Mars Navigator
 
-Mars Navigator is a web application for viewing simulated EVA routes, hazards, suit telemetry, and named surface features on an interactive 3D Mars globe. CesiumJS renders NASA/JPL Mars Trek's Viking MDIM 2.1 global color mosaic on a Mars-sized ellipsoid. Optional map layers start off and can be turned on individually, including MOLA/HRSC terrain, place names, higher-resolution Curiosity and InSight imagery, and Curiosity's recorded traverse and named stops. Rover locations and details come from NASA Mars Trek and represent map records, not live rover tracking. The API serves mission-planning data from a local JSON file.
+Mars Navigator is a web application for viewing simulated EVA routes, hazards, suit telemetry, and named surface features on an interactive 3D Mars globe. CesiumJS renders NASA/JPL Mars Trek's Viking MDIM 2.1 global color mosaic on a Mars-sized ellipsoid. Optional map layers start off and can be turned on individually, including MOLA/HRSC terrain, place names, higher-resolution Curiosity and InSight imagery, and Curiosity and Perseverance rover records. Rover locations and details come from NASA Mars Trek and represent map records, not live rover tracking. The API serves mission-planning data from a local JSON file.
 
 ## Project structure
 
@@ -56,6 +56,7 @@ Run the backend tests with `npm test`.
 - `GET /api/route/:site` returns route waypoints and estimated mission telemetry.
 - `GET /api/places?bbox=west,south,east,north` returns NASA Mars Trek place names for a map area.
 - `GET /api/curiosity` returns Curiosity's recorded traverse and named stops from NASA Mars Trek.
+- `GET /api/perseverance` returns Perseverance's recorded traverse, named locations, and landing ellipse from NASA Mars Trek.
 - `GET /api/elevation?points=latitude,longitude` returns MOLA elevation samples for custom coordinates.
 - `POST /api/navigation/terrain` samples NASA MOLA elevations and calculates an experimental lower-risk route.
 

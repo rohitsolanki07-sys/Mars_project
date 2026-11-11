@@ -215,6 +215,21 @@ app.get('/api/curiosity', async (req, res) => {
   }
 });
 
+// Return Perseverance's recorded traverse, named stops, and landing ellipse.
+app.get('/api/perseverance', async (req, res) => {
+  try {
+    const result = await marsRoverService.getPerseveranceLayers();
+    res.set('Cache-Control', 'public, max-age=3600');
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('ERROR loading NASA Perseverance rover layers:', err.message);
+    return res.status(502).json({
+      success: false,
+      message: 'NASA Mars Trek Perseverance data is temporarily unavailable.'
+    });
+  }
+});
+
 // Calculate an experimental low-risk path using NASA MOLA elevations.
 app.post('/api/navigation/terrain', async (req, res) => {
   try {

@@ -268,6 +268,33 @@
         <button
           type="button"
           class="sidebar-layer-toggle"
+          id="togglePerseveranceImageryBtn"
+          aria-pressed="false"
+          aria-controls="perseveranceImagePreview"
+          title="Show the NASA Mars Trek Jezero Crater image"
+        >
+          <span class="sidebar-layer-name">
+            <span aria-hidden="true">🛰️</span>
+            <span>Perseverance site image</span>
+          </span>
+          <span class="sidebar-layer-state" aria-hidden="true">Off</span>
+        </button>
+        <button
+          type="button"
+          class="sidebar-layer-toggle"
+          id="togglePerseveranceRoverBtn"
+          aria-pressed="false"
+          title="Toggle Perseverance's recorded traverse, landing ellipse, and named stops from NASA Mars Trek"
+        >
+          <span class="sidebar-layer-name">
+            <span aria-hidden="true">🤖</span>
+            <span>Perseverance traverse &amp; site</span>
+          </span>
+          <span class="sidebar-layer-state" aria-hidden="true">Off</span>
+        </button>
+        <button
+          type="button"
+          class="sidebar-layer-toggle"
           id="toggleInsightImageryBtn"
           aria-pressed="false"
           title="Toggle the NASA Mars Trek InSight CTX surface image"
@@ -287,6 +314,26 @@
             <div id="curiosityWaypointList" class="curiosity-waypoint-list"></div>
           </details>
           <p id="curiosityLayerStatus" class="map-pick-status" role="status" aria-live="polite"></p>
+        </div>
+        <div class="perseverance-layer-info">
+          <h3>Perseverance at Jezero Crater</h3>
+          <p>Explore the NASA Mars Trek site image, recorded rover path, landing ellipse, and named locations. Rover records are historical map data, not a live position.</p>
+          <button type="button" class="pick-map-btn" id="focusPerseveranceBtn">Go to Jezero Crater</button>
+          <figure id="perseveranceImagePreview" class="perseverance-image-preview" hidden>
+            <a href="https://trek.nasa.gov/assets/bookmarks/mars/perseverance/jezero-crater/jezero_crater_large.jpg" target="_blank" rel="noopener noreferrer">
+              <img
+                src="https://trek.nasa.gov/assets/bookmarks/mars/perseverance/jezero-crater/jezero_crater.jpg"
+                alt="NASA Mars Trek orbital image of Jezero Crater, Perseverance's landing site"
+                loading="lazy"
+              >
+            </a>
+            <figcaption>Jezero Crater · NASA/JPL Mars Trek</figcaption>
+          </figure>
+          <details id="perseveranceStopsDetails" hidden>
+            <summary>Browse named locations</summary>
+            <div id="perseveranceWaypointList" class="curiosity-waypoint-list"></div>
+          </details>
+          <p id="perseveranceLayerStatus" class="map-pick-status" role="status" aria-live="polite"></p>
         </div>
         <p class="sidebar-layer-description">Choose layers one at a time. All optional layers start off.</p>
       </div>

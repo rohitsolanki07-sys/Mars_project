@@ -67,6 +67,25 @@ The path and waypoint records are map data, not a live rover location feed.
 Click a named stop for its coordinates and NASA Mars Trek source page, or use
 **Go to Gale Crater** to move the map to the rover's region.
 
+### Perseverance rover information
+
+The Layers view can show a NASA Mars Trek image preview of Jezero Crater and
+Perseverance's recorded traverse, landing ellipse, and named locations. The map
+records are retrieved from NASA Mars Trek's public ArcGIS feature services:
+
+- [Perseverance traverse path](https://trek.nasa.gov/mars/trekarcgis/rest/services/Perseverance_Traverse_Path/MapServer/0)
+  supplies recorded route segments.
+- [Perseverance named locations](https://trek.nasa.gov/mars/trekarcgis/rest/services/mars2020_waypoints/MapServer/0)
+  supplies named sites and links to their NASA Mars Trek pages.
+- [Perseverance landing ellipse](https://trek.nasa.gov/mars/trekarcgis/rest/services/perseverance_landing_ellipse/MapServer/0)
+  supplies the landing area outline.
+- [Jezero Crater image](https://trek.nasa.gov/assets/bookmarks/mars/perseverance/jezero-crater/jezero_crater.jpg)
+  is a site image preview in the Layers panel; it is not a georeferenced map
+  mosaic.
+
+These are historical map records, not a live rover location feed. Use **Go to
+Jezero Crater** to move the map to the landing site.
+
 ### Place names and feature information
 
 Place labels and their map popups are loaded for the visible map area from

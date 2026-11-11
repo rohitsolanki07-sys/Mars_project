@@ -668,6 +668,9 @@ const terrainRouteLayerGroup = new GlobeLayerGroup();
 const placeNamesLayerGroup = new GlobeLayerGroup();
 const curiosityTraverseLayerGroup = new GlobeLayerGroup();
 const curiosityWaypointLayerGroup = new GlobeLayerGroup();
+const perseveranceTraverseLayerGroup = new GlobeLayerGroup();
+const perseveranceWaypointLayerGroup = new GlobeLayerGroup();
+const perseveranceLandingLayerGroup = new GlobeLayerGroup();
 
 const themeToggleBtn = document.getElementById('themeToggleBtn');
 const APP_THEME_STORAGE_KEY = 'ares-nav-theme';
@@ -743,6 +746,12 @@ let lastPlaceNamesBounds = '';
 let curiosityDataLoaded = false;
 let curiosityDataRequest = null;
 let curiosityWaypointCount = 0;
+let perseveranceImageryEnabled = false;
+let perseveranceRoverEnabled = false;
+let perseveranceDataLoaded = false;
+let perseveranceDataRequest = null;
+let perseveranceWaypointCount = 0;
+let perseverancePathCount = 0;
 const LOCAL_BACKEND_PORTS = ['3000', '5500', '3001', '3002', '5050', '8080'];
 
 // The terrain legend follows the same toggle as the NASA MOLA overlay.
@@ -1405,6 +1414,77 @@ function populateCuriosityWaypointList(waypoints) {
   details.hidden = waypoints.length === 0;
 }
 
+function createPerseveranceWaypointPopup(waypoint) {
+  const popup = createMapPopup(waypoint.name, [
+    [
+      'Coordinates',
+      `${Math.abs(waypoint.latitude).toFixed(4)}° ${waypoint.latitude < 0 ? 'S' : 'N'}, ${Math.abs(waypoint.longitude).toFixed(4)}° ${waypoint.longitude < 0 ? 'W' : 'E'}`
+    ],
+    ['Data source', 'NASA Mars Trek Perseverance waypoint layer']
+  ]);
+  if (!waypoint.sourceUrl) return popup;
+
+  const sourceUrl = new URL(waypoint.sourceUrl);
+  if (
+    sourceUrl.protocol !== 'https:' ||
+    sourceUrl.hostname !== 'trek.nasa.gov' ||
+    !sourceUrl.pathname.startsWith('/assets/bookmarks/mars/perseverance/')
+  ) {
+    return popup;
+  }
+  const link = document.createElement('a');
+  link.href = sourceUrl.href;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.textContent = 'Open this location in NASA Mars Trek';
+  popup.append(link);
+  return popup;
+}
+
+function focusPerseveranceWaypoint(waypoint) {
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(
+      waypoint.longitude,
+      waypoint.latitude,
+      12000,
+      MARS_ELLIPSOID
+    ),
+    orientation: {
+      heading: viewer.camera.heading,
+      pitch: -Math.PI / 2,
+      roll: 0
+    },
+    duration: 1,
+    complete: () => {
+      showMapPopup(
+        createPerseveranceWaypointPopup(waypoint),
+        new Cesium.Cartesian2(
+          viewer.canvas.clientWidth / 2,
+          viewer.canvas.clientHeight / 2
+        )
+      );
+    }
+  });
+}
+
+function populatePerseveranceWaypointList(waypoints) {
+  const details = document.getElementById('perseveranceStopsDetails');
+  const list = document.getElementById('perseveranceWaypointList');
+  if (!details || !list) return;
+
+  list.replaceChildren();
+  waypoints.forEach((waypoint) => {
+    const latitude = `${Math.abs(waypoint.latitude).toFixed(4)}° ${waypoint.latitude < 0 ? 'S' : 'N'}`;
+    const longitude = `${Math.abs(waypoint.longitude).toFixed(4)}° ${waypoint.longitude < 0 ? 'W' : 'E'}`;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = `${waypoint.name} · ${latitude}, ${longitude}`;
+    button.addEventListener('click', () => focusPerseveranceWaypoint(waypoint));
+    list.append(button);
+  });
+  details.hidden = waypoints.length === 0;
+}
+
 async function fetchCuriosityLayersFromApi() {
   const apiUrls = [];
   if (window.location.protocol !== 'file:') {
@@ -1518,6 +1598,146 @@ async function loadCuriosityRoverData() {
     });
   }
   return curiosityDataRequest;
+}
+
+async function fetchPerseveranceLayersFromApi() {
+  const apiUrls = [];
+  if (window.location.protocol !== 'file:') {
+    apiUrls.push(new URL('/api/perseverance', window.location.origin));
+  }
+  if (
+    window.location.protocol === 'file:' ||
+    ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+  ) {
+    const host =
+      window.location.protocol === 'file:'
+        ? 'localhost'
+        : window.location.hostname;
+    const ports = new Set([window.location.port, ...LOCAL_BACKEND_PORTS]);
+    for (const port of ports) {
+      if (port) apiUrls.push(new URL('/api/perseverance', `http://${host}:${port}`));
+    }
+  }
+
+  const failures = [];
+  for (const apiUrl of apiUrls) {
+    try {
+      const response = await fetch(apiUrl, {
+        signal: AbortSignal.timeout(20000)
+      });
+      if (!response.ok) {
+        failures.push(`HTTP ${response.status} from ${apiUrl.origin}`);
+        continue;
+      }
+      const result = await response.json();
+      if (
+        result.success &&
+        Array.isArray(result.traverse) &&
+        Array.isArray(result.waypoints) &&
+        Array.isArray(result.landingEllipse)
+      ) {
+        return result;
+      }
+      failures.push(result.message || `Invalid response from ${apiUrl.origin}`);
+    } catch (error) {
+      if (error.name === 'AbortError' || error.name === 'TimeoutError') throw error;
+      failures.push(`${apiUrl.origin}: ${error.message}`);
+    }
+  }
+  throw new Error(
+    failures.length
+      ? `NASA Perseverance data could not be loaded (${failures.join('; ')}).`
+      : 'NASA Perseverance data is unavailable from this page.'
+  );
+}
+
+async function loadPerseveranceRoverData() {
+  if (perseveranceDataLoaded) return perseveranceWaypointCount;
+  if (!perseveranceDataRequest) {
+    perseveranceDataRequest = (async () => {
+      const data = await fetchPerseveranceLayersFromApi();
+      populatePerseveranceWaypointList(data.waypoints);
+      data.traverse.forEach((coordinates, pathIndex) => {
+        const positions = coordinates.map(([longitude, latitude]) =>
+          Cesium.Cartesian3.fromDegrees(longitude, latitude, 0, MARS_ELLIPSOID)
+        );
+        const entity = viewer.entities.add({
+          polyline: {
+            positions,
+            width: 3,
+            material: Cesium.Color.fromCssColorString('#ff765e')
+          }
+        });
+        entity.mapPopup = createMapPopup('Perseverance recorded traverse', [
+          ['Path', `NASA Mars Trek Perseverance route segment ${pathIndex + 1}`],
+          ['Data source', 'NASA Mars Trek Perseverance_Traverse_Path layer'],
+          ['Rover status', 'Recorded route, not a live position']
+        ]);
+        perseveranceTraverseLayerGroup.addLayer(entity);
+      });
+
+      data.landingEllipse.forEach((ring) => {
+        const positions = ring.map(([longitude, latitude]) =>
+          Cesium.Cartesian3.fromDegrees(longitude, latitude, 0, MARS_ELLIPSOID)
+        );
+        const entity = viewer.entities.add({
+          polygon: {
+            hierarchy: positions,
+            material: Cesium.Color.fromCssColorString('#63d7ff').withAlpha(0.13),
+            outline: true,
+            outlineColor: Cesium.Color.fromCssColorString('#63d7ff'),
+            outlineWidth: 2
+          }
+        });
+        entity.mapPopup = createMapPopup('Perseverance landing ellipse', [
+          ['Data source', 'NASA Mars Trek perseverance_landing_ellipse layer'],
+          ['Landing site', 'Jezero Crater']
+        ]);
+        perseveranceLandingLayerGroup.addLayer(entity);
+      });
+
+      data.waypoints.forEach((waypoint) => {
+        const entity = viewer.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(
+            waypoint.longitude,
+            waypoint.latitude,
+            0,
+            MARS_ELLIPSOID
+          ),
+          point: {
+            pixelSize: 8,
+            color: Cesium.Color.fromCssColorString('#8df0ff'),
+            outlineColor: Cesium.Color.fromCssColorString('#19202d'),
+            outlineWidth: 2,
+            disableDepthTestDistance: 0
+          },
+          label: {
+            text: waypoint.name,
+            font: '11px Roboto, sans-serif',
+            fillColor: Cesium.Color.WHITE,
+            outlineColor: Cesium.Color.fromCssColorString('#111827'),
+            outlineWidth: 3,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            showBackground: true,
+            backgroundColor: Cesium.Color.fromCssColorString('#101827').withAlpha(0.9),
+            pixelOffset: new Cesium.Cartesian2(0, -13),
+            horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+            disableDepthTestDistance: 0
+          }
+        });
+        entity.mapPopup = createPerseveranceWaypointPopup(waypoint);
+        perseveranceWaypointLayerGroup.addLayer(entity);
+      });
+      perseveranceDataLoaded = true;
+      perseveranceWaypointCount = data.waypoints.length;
+      perseverancePathCount = data.traverse.length;
+      return perseveranceWaypointCount;
+    })().finally(() => {
+      perseveranceDataRequest = null;
+    });
+  }
+  return perseveranceDataRequest;
 }
 
 function clearPlaceNameLayers() {
@@ -2700,6 +2920,7 @@ function applyMapLayersForView(view = currentAppView) {
   const showPlaceNames = placeNamesEnabled;
   const showCuriosityImagery = curiosityImageryEnabled;
   const showCuriosityRover = curiosityRoverEnabled;
+  const showPerseveranceRover = perseveranceRoverEnabled;
   const showInsightImagery = insightImageryEnabled;
 
   setMapLayerVisible(routeLayerGroup, showSavedRoute);
@@ -2711,6 +2932,9 @@ function applyMapLayersForView(view = currentAppView) {
   setMapLayerVisible(curiosityHiRISEImagery, showCuriosityImagery);
   setMapLayerVisible(curiosityTraverseLayerGroup, showCuriosityRover);
   setMapLayerVisible(curiosityWaypointLayerGroup, showCuriosityRover);
+  setMapLayerVisible(perseveranceTraverseLayerGroup, showPerseveranceRover);
+  setMapLayerVisible(perseveranceWaypointLayerGroup, showPerseveranceRover);
+  setMapLayerVisible(perseveranceLandingLayerGroup, showPerseveranceRover);
   setMapLayerVisible(insightCTXImagery, showInsightImagery);
 
   if (showMola && !molaLegendVisible) {
@@ -2809,6 +3033,48 @@ toggleCuriosityRoverBtn?.addEventListener('click', async () => {
   }
 });
 
+const togglePerseveranceImageryBtn = document.getElementById(
+  'togglePerseveranceImageryBtn'
+);
+togglePerseveranceImageryBtn?.addEventListener('click', () => {
+  perseveranceImageryEnabled = !perseveranceImageryEnabled;
+  updateLayerToggle(togglePerseveranceImageryBtn, perseveranceImageryEnabled);
+  const preview = document.getElementById('perseveranceImagePreview');
+  if (preview) preview.hidden = !perseveranceImageryEnabled;
+});
+
+const togglePerseveranceRoverBtn = document.getElementById(
+  'togglePerseveranceRoverBtn'
+);
+togglePerseveranceRoverBtn?.addEventListener('click', async () => {
+  perseveranceRoverEnabled = !perseveranceRoverEnabled;
+  updateLayerToggle(togglePerseveranceRoverBtn, perseveranceRoverEnabled);
+  applyMapLayersForView(currentAppView);
+  const status = document.getElementById('perseveranceLayerStatus');
+
+  if (!perseveranceRoverEnabled) {
+    if (status && !perseveranceDataLoaded) status.textContent = '';
+    return;
+  }
+
+  if (status) status.textContent = 'Loading Perseverance rover data from NASA Mars Trek…';
+  try {
+    const waypointCount = await loadPerseveranceRoverData();
+    if (status) {
+      status.textContent = `NASA Mars Trek data loaded: ${perseverancePathCount} recorded path segments, landing ellipse, and ${waypointCount} named locations.`;
+    }
+    applyMapLayersForView(currentAppView);
+  } catch (error) {
+    perseveranceRoverEnabled = false;
+    updateLayerToggle(togglePerseveranceRoverBtn, false);
+    applyMapLayersForView(currentAppView);
+    if (status) {
+      status.textContent = 'Perseverance rover layers could not be loaded. Check your connection and try again.';
+    }
+    console.error('Unable to load NASA Mars Trek Perseverance rover layers:', error);
+  }
+});
+
 const toggleInsightImageryBtn = document.getElementById(
   'toggleInsightImageryBtn'
 );
@@ -2823,6 +3089,23 @@ document.getElementById('focusCuriosityBtn')?.addEventListener('click', () => {
     destination: Cesium.Cartesian3.fromDegrees(
       137.4,
       -4.65,
+      50000,
+      MARS_ELLIPSOID
+    ),
+    orientation: {
+      heading: viewer.camera.heading,
+      pitch: -Math.PI / 2,
+      roll: 0
+    },
+    duration: 1.2
+  });
+});
+
+document.getElementById('focusPerseveranceBtn')?.addEventListener('click', () => {
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(
+      77.45666,
+      18.44627,
       50000,
       MARS_ELLIPSOID
     ),
