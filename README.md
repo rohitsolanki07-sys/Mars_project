@@ -69,6 +69,8 @@ is still a direct point-to-point estimate. To request an experimental terrain-
 aware path between the selected endpoints, choose a grid spacing and click
 **Find a lower-risk terrain route**. It uses NASA Mars Trek's live elevation
 service and the selected mission site's known hazards.
+When a terrain route is found, the planner also shows modeled review flags and
+can download an offline text briefing with sampled route points and limitations.
 If an endpoint falls on unknown or restricted terrain, the planner can move it
 to the nearest traversable sampled cell up to 100 km away. The adjusted
 location and distance are shown with the result. Long-range searches use the
@@ -106,3 +108,8 @@ assumptions, resolution limits, and configuration.
 ## Notes
 
 The route and telemetry data are local demonstration data, not operational guidance. Mars Trek map imagery and place names require an internet connection. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the project's data, map, and software resources and contribution guidance. Basemap source: [NASA/JPL Mars Trek](https://trek.nasa.gov/mars/), [Viking MDIM 2.1 global color mosaic service](https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_Viking_MDIM21_ClrMosaic_global_232m/ImageServer).
+
+The in-app **Credits** view counts 13 live NASA/JPL Mars Trek service layers
+and one Jezero image preview; these are data sources, not NASA software tools.
+The **About** view identifies the NeuroMars team: Rohit Solanki and Gourav
+Jangid.

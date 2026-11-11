@@ -106,6 +106,20 @@ These are live services, so labels and available details depend on network
 access and on the records returned for the current map area. Empty fields are
 not filled with invented descriptions.
 
+### Credits and source count
+
+The in-app Credits view attributes **13 NASA/JPL Mars Trek service layers**:
+three global/MOLA services, three Curiosity services, one InSight image
+service, three Perseverance services, and three nomenclature/feature services.
+The Perseverance Jezero site image is a separate static preview, making one
+additional image asset. These are data services and assets, not NASA software
+tools. The USGS Gazetteer of Planetary Nomenclature is linked as the reference
+for approved feature names; it is not counted as a Mars Trek layer.
+
+The app's 3D map uses CesiumJS, and the web/API server uses Express and Node.js.
+Provider credits do not indicate endorsement. The About view names the
+NeuroMars team members Rohit Solanki and Gourav Jangid.
+
 ### MOLA terrain overlay
 
 The optional, sidebar-controlled MOLA terrain overlay is rendered from NASA

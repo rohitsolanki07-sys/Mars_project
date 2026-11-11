@@ -897,6 +897,10 @@ function clearTerrainNavigationRoute() {
   if (stats) stats.textContent = '';
   const confidence = document.getElementById('terrainRouteConfidence');
   if (confidence) confidence.textContent = '';
+  const reviewSummary = document.getElementById('terrainRouteReviewSummary');
+  if (reviewSummary) reviewSummary.textContent = '';
+  const reviewList = document.getElementById('terrainRouteReviewList');
+  if (reviewList) reviewList.replaceChildren();
 }
 
 function getRouteLocations(siteData) {
@@ -2824,6 +2828,7 @@ function renderTerrainNavigationResult(route) {
       `MOLA source resolution is about ${route.confidence.sourceResolutionMeters?.toFixed(0) ?? 'unknown'} m. ` +
       route.confidence.reason;
   }
+  renderTerrainRouteReview(route);
 
   document.getElementById('distVal').textContent =
     route.totalDistanceKilometers.toFixed(2);
@@ -2836,6 +2841,125 @@ function renderTerrainNavigationResult(route) {
   applyMapLayersForView(currentAppView);
   map.fitBounds(routeEntity.getBounds(), { duration: 0.8 });
 }
+
+function getTerrainRouteReviewItems(route) {
+  const terrainClasses = route.terrainClassCounts || {};
+  const cautionCells = terrainClasses.CAUTION || 0;
+  const highRiskCells = terrainClasses.HIGH_RISK || 0;
+  const unknownCells = route.unknownCellsBlocked || 0;
+  const coverage = Number.isFinite(route.terrainCoveragePercent)
+    ? route.terrainCoveragePercent
+    : null;
+  const maximumSlope = Number.isFinite(route.maximumSlopeDegrees)
+    ? route.maximumSlopeDegrees
+    : null;
+  const endpointAdjustments = Object.values(route.endpointAdjustments || {})
+    .filter((distance) => Number.isFinite(distance) && distance >= 1);
+  const reviewFlags = [];
+
+  if (cautionCells > 0) {
+    reviewFlags.push(
+      `${cautionCells} route cells are classed as caution based on sampled slope, roughness, or elevation change.`
+    );
+  }
+  if (highRiskCells > 0) {
+    reviewFlags.push(
+      `${highRiskCells} route cells are classed as high risk by the terrain model; inspect these segments before use.`
+    );
+  }
+  if (maximumSlope !== null) {
+    reviewFlags.push(
+      `Maximum sampled route slope: ${maximumSlope.toFixed(1)}°${maximumSlope > 10 ? ' (above the planner’s 10° caution threshold).' : '.'}`
+    );
+  }
+  if (coverage !== null) {
+    reviewFlags.push(
+      `Elevation samples cover ${coverage.toFixed(1)}% of the planning grid; ${unknownCells} unknown cells were blocked. This is grid-area coverage, not a safety probability.`
+    );
+  }
+  if (endpointAdjustments.length > 0) {
+    reviewFlags.push(
+      `An endpoint was moved to sampled traversable terrain by ${endpointAdjustments.map((distance) => `${distance.toFixed(0)} m`).join(' and ')}; confirm the adjusted coordinates.`
+    );
+  }
+  if (reviewFlags.length === 0) {
+    reviewFlags.push(
+      'No modeled review flags were detected in available samples. This does not establish that the route is safe.'
+    );
+  }
+
+  return reviewFlags;
+}
+
+function renderTerrainRouteReview(route) {
+  const summary = document.getElementById('terrainRouteReviewSummary');
+  const list = document.getElementById('terrainRouteReviewList');
+  if (!summary || !list) return;
+
+  const reviewFlags = getTerrainRouteReviewItems(route);
+  summary.textContent = `${reviewFlags.length} route review item${reviewFlags.length === 1 ? '' : 's'} — review before use.`;
+  list.replaceChildren(...reviewFlags.map((text) => {
+    const item = document.createElement('li');
+    item.textContent = text;
+    return item;
+  }));
+}
+
+function downloadTerrainRouteBriefing(route) {
+  const siteName = currentSiteDetails?.site_name || 'Mars site';
+  const endpointName = (endpoint, fallback) =>
+    currentRouteEndpoints[endpoint]?.name || fallback;
+  const routeCells = Array.isArray(route.routeCells) ? route.routeCells : [];
+  const waypoints = routeCells.length
+    ? routeCells.map((cell, index) =>
+      `${String(index + 1).padStart(2, '0')}. ${cell.latitude.toFixed(5)}°, ${cell.longitude.toFixed(5)}° | elevation ${Number.isFinite(cell.elevationMeters) ? `${cell.elevationMeters.toFixed(0)} m` : 'unknown'} | slope ${Number.isFinite(cell.slopeDegrees) ? `${cell.slopeDegrees.toFixed(1)}°` : 'unknown'} | ${cell.state || 'terrain class unavailable'}`
+    )
+    : route.routeCoordinates.map((point, index) =>
+      `${String(index + 1).padStart(2, '0')}. ${point.latitude.toFixed(5)}°, ${point.longitude.toFixed(5)}°`
+    );
+  const report = [
+    'MARS NAVIGATOR — EXPERIMENTAL TERRAIN ROUTE BRIEFING',
+    `Generated: ${new Date().toISOString()}`,
+    `Site: ${siteName}`,
+    `Travel mode: ${activeTravelMode}`,
+    `From: ${endpointName('departure', 'Selected start')}`,
+    `To: ${endpointName('arrival', 'Selected destination')}`,
+    `Distance: ${route.totalDistanceKilometers.toFixed(2)} km`,
+    `Estimated travel time: ${(route.totalDistanceKilometers / Math.max(activeTravelSpeedKmH, 0.1)).toFixed(2)} hours (speed-based estimate only)`,
+    `Average / maximum sampled slope: ${route.averageSlopeDegrees.toFixed(1)}° / ${route.maximumSlopeDegrees.toFixed(1)}°`,
+    `Terrain grid spacing: ${route.grid.resolutionMeters.toFixed(0)} m`,
+    `Planning-grid elevation coverage: ${route.terrainCoveragePercent.toFixed(1)}%`,
+    `Terrain class cells — caution: ${route.terrainClassCounts.CAUTION || 0}, high risk: ${route.terrainClassCounts.HIGH_RISK || 0}`,
+    `Known restricted cells avoided: ${route.restrictedCellsAvoided}`,
+    '',
+    'ROUTE REVIEW ITEMS',
+    ...getTerrainRouteReviewItems(route).map((item) => `- ${item}`),
+    '',
+    'ROUTE SAMPLES',
+    ...waypoints,
+    '',
+    'LIMITATIONS',
+    route.confidence.reason,
+    'This experimental route is not astronaut-certified or operational guidance. MOLA data cannot resolve foot-scale rocks, cracks, dust, or other small/current hazards. Confirm conditions and route decisions with validated mission systems and human review.',
+    `Terrain data source: ${route.dataSource || 'NASA Mars Trek MOLA/HRSC DEM'}`
+  ].join('\n');
+  const safeSiteName = siteName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'mars-site';
+  const downloadUrl = URL.createObjectURL(
+    new Blob([report], { type: 'text/plain;charset=utf-8' })
+  );
+  const link = document.createElement('a');
+  link.href = downloadUrl;
+  link.download = `${safeSiteName}-terrain-route-briefing.txt`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+}
+
+document.getElementById('downloadRouteBriefBtn')?.addEventListener('click', () => {
+  if (!terrainNavigationResult) return;
+  downloadTerrainRouteBriefing(terrainNavigationResult);
+});
 
 const calculateTerrainRouteBtn = document.getElementById(
   'calculateTerrainRouteBtn'
@@ -3142,7 +3266,9 @@ const APP_VIEW_SECTIONS = {
   planner: ['routeSummarySection', 'routeStepsSection'],
   telemetry: ['telemetrySection'],
   layers: ['layerSection'],
-  hazards: ['hazardSection']
+  hazards: ['hazardSection'],
+  credits: ['creditsSection'],
+  about: ['aboutSection']
 };
 
 function updateSidebarForView(view) {

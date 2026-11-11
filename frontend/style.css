@@ -245,14 +245,18 @@ html, body {
 
 body[data-app-view="telemetry"] .nav-sidebar,
 body[data-app-view="layers"] .nav-sidebar,
-body[data-app-view="hazards"] .nav-sidebar {
+body[data-app-view="hazards"] .nav-sidebar,
+body[data-app-view="credits"] .nav-sidebar,
+body[data-app-view="about"] .nav-sidebar {
   bottom: auto;
   max-height: calc(100vh - 112px);
 }
 
 body[data-app-view="telemetry"] .nav-sidebar-body,
 body[data-app-view="layers"] .nav-sidebar-body,
-body[data-app-view="hazards"] .nav-sidebar-body {
+body[data-app-view="hazards"] .nav-sidebar-body,
+body[data-app-view="credits"] .nav-sidebar-body,
+body[data-app-view="about"] .nav-sidebar-body {
   flex: 0 1 auto;
 }
 
@@ -1508,10 +1512,18 @@ body:not([data-app-view="layers"]):not([data-place-names="true"]) #placesStatus 
 
   body[data-app-view="telemetry"] .nav-sidebar,
   body[data-app-view="layers"] .nav-sidebar,
-  body[data-app-view="hazards"] .nav-sidebar {
+  body[data-app-view="hazards"] .nav-sidebar,
+  body[data-app-view="credits"] .nav-sidebar,
+  body[data-app-view="about"] .nav-sidebar {
     top: auto;
     bottom: 16px;
     max-height: 55vh;
+  }
+
+  .app-nav-links {
+    overflow-x: auto;
+    justify-content: flex-start;
+    scrollbar-width: thin;
   }
 
   .sidebar-toggle-btn {
@@ -4020,6 +4032,70 @@ html[data-theme="dark"] .pick-map-btn.active {
   border-color: rgba(95, 227, 255, 0.4);
   background: rgba(27, 169, 214, 0.17);
   color: #b9f5ff;
+}
+
+.terrain-route-review {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.terrain-route-review ul,
+.credit-list,
+.team-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+
+.terrain-route-review li,
+.credit-list li,
+.team-list li {
+  margin: 5px 0;
+}
+
+.terrain-route-review .secondary-nav-btn {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.info-section {
+  line-height: 1.5;
+}
+
+.info-section h2 {
+  margin: 18px 0 4px;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.info-intro {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
+.credit-list a,
+.info-intro a {
+  color: #0c65a5;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+html[data-theme="dark"] .credit-list a,
+html[data-theme="dark"] .info-intro a {
+  color: #7dd3fc;
+}
+
+@media (max-width: 768px) {
+  .app-nav-link {
+    flex: 0 0 auto;
+    padding: 0 7px;
+  }
 }
 
 html[data-theme="dark"] .icon-action-btn:hover {

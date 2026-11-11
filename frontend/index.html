@@ -70,6 +70,12 @@
       <button class="app-nav-link" type="button" data-app-view="hazards" aria-current="false">
         <span class="app-nav-icon">⚠</span><span>Hazards</span>
       </button>
+      <button class="app-nav-link" type="button" data-app-view="credits" aria-current="false">
+        <span class="app-nav-icon">✧</span><span>Credits</span>
+      </button>
+      <button class="app-nav-link" type="button" data-app-view="about" aria-current="false">
+        <span class="app-nav-icon">ⓘ</span><span>About</span>
+      </button>
     </nav>
 
     <div class="app-nav-actions">
@@ -349,6 +355,14 @@
           <div class="section-title">TERRAIN ROUTE ESTIMATES</div>
           <p id="terrainRouteStats"></p>
           <p id="terrainRouteConfidence" class="terrain-safety-note"></p>
+          <div class="terrain-route-review">
+            <div class="section-title">ROUTE REVIEW FLAGS</div>
+            <p id="terrainRouteReviewSummary"></p>
+            <ul id="terrainRouteReviewList"></ul>
+            <button type="button" class="secondary-nav-btn" id="downloadRouteBriefBtn">
+              Download offline route briefing
+            </button>
+          </div>
         </div>
         <div class="eta-actions">
           <button id="startNavBtn" class="primary-nav-btn">
@@ -401,6 +415,44 @@
           No active hazards loaded.
         </div>
       </div>
+
+      <section class="section-block info-section" id="creditsSection" hidden aria-labelledby="creditsTitle">
+        <div class="section-title" id="creditsTitle">DATA &amp; SOFTWARE CREDITS</div>
+        <p class="info-intro">Mars Navigator uses public Mars mapping and science resources. Source data remains the property of its providers; their use does not imply endorsement.</p>
+        <h2>NASA / JPL Mars Trek</h2>
+        <p class="info-intro"><strong>13 live map/data service layers</strong> plus <strong>1 site-image preview</strong> are integrated from NASA/JPL Mars Trek. These are data sources, not 14 NASA software tools.</p>
+        <ul class="credit-list">
+          <li><a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_Viking_MDIM21_ClrMosaic_global_232m/ImageServer" target="_blank" rel="noopener noreferrer">Viking MDIM 2.1 global color mosaic</a></li>
+          <li><a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_MOLA_blend200ppx_HRSC_ClrShade_clon0dd_200mpp/ImageServer" target="_blank" rel="noopener noreferrer">MOLA/HRSC color-shaded relief</a></li>
+          <li><a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_MOLA_blend200ppx_HRSC_DEM_clon0dd_200mpp_lzw/ImageServer" target="_blank" rel="noopener noreferrer">MOLA/HRSC elevation data</a></li>
+          <li><a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/curiosity_hirise_mosaic/ImageServer" target="_blank" rel="noopener noreferrer">Curiosity HiRISE mosaic</a>, <a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/curiosity_path/MapServer/0" target="_blank" rel="noopener noreferrer">traverse</a>, and <a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/curiosity_waypoints/MapServer/0" target="_blank" rel="noopener noreferrer">waypoints</a></li>
+          <li><a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/InSightCTXMosaic_112917_gcs/ImageServer" target="_blank" rel="noopener noreferrer">InSight CTX mosaic</a></li>
+          <li><a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/Perseverance_Traverse_Path/MapServer/0" target="_blank" rel="noopener noreferrer">Perseverance traverse</a>, <a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/mars2020_waypoints/MapServer/0" target="_blank" rel="noopener noreferrer">named locations</a>, and <a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/perseverance_landing_ellipse/MapServer/0" target="_blank" rel="noopener noreferrer">landing ellipse</a></li>
+          <li><a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/outreach_nomenclature/MapServer/0" target="_blank" rel="noopener noreferrer">Official Mars nomenclature</a>, <a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/major_features/MapServer/0" target="_blank" rel="noopener noreferrer">major surface features</a>, and <a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/mars_regions/MapServer/0" target="_blank" rel="noopener noreferrer">named regions</a></li>
+          <li><a href="https://trek.nasa.gov/assets/bookmarks/mars/perseverance/jezero-crater/jezero_crater.jpg" target="_blank" rel="noopener noreferrer">Jezero Crater site-image preview</a> (the additional image asset)</li>
+        </ul>
+        <h2>USGS Astrogeology</h2>
+        <p class="info-intro">Approved planetary names may link to the <a href="https://planetarynames.wr.usgs.gov/" target="_blank" rel="noopener noreferrer">USGS Gazetteer of Planetary Nomenclature</a>, which is a reference for individual named features.</p>
+        <h2>Software used</h2>
+        <ul class="credit-list">
+          <li><a href="https://cesium.com/platform/cesiumjs/" target="_blank" rel="noopener noreferrer">CesiumJS</a> — interactive 3D Mars globe</li>
+          <li><a href="https://expressjs.com/" target="_blank" rel="noopener noreferrer">Express</a> — local API and web server</li>
+          <li><a href="https://nodejs.org/" target="_blank" rel="noopener noreferrer">Node.js</a> — application runtime</li>
+        </ul>
+        <p class="terrain-safety-note">NASA, JPL, USGS, and other listed providers do not endorse this project. The route planner is experimental and not certified for mission use.</p>
+      </section>
+
+      <section class="section-block info-section" id="aboutSection" hidden aria-labelledby="aboutTitle">
+        <div class="section-title" id="aboutTitle">ABOUT NEUROMARS</div>
+        <p class="info-intro">NeuroMars is building a Mars surface navigation prototype to explore map-based route planning, terrain awareness, and mission information in one place.</p>
+        <h2>Team members</h2>
+        <ul class="team-list">
+          <li>Rohit Solanki</li>
+          <li>Gourav Jangid</li>
+        </ul>
+        <h2>Important limitation</h2>
+        <p class="info-intro">This project is a research and demonstration aid, not an operational navigation system. Its terrain data cannot reveal small rocks, cracks, dust conditions, or current surface hazards. Astronauts must rely on validated mission systems and human review.</p>
+      </section>
 
       <!-- Turn-by-Turn Waypoint Steps -->
       <div class="section-block" id="routeStepsSection">
