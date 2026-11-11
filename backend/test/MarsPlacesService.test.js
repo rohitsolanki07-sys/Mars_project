@@ -105,3 +105,35 @@ test('samples NASA MOLA elevations for multiple coordinates in the correct order
     global.fetch = originalFetch;
   }
 });
+
+test('caches samples by interpolation method and preserves NoData as null', async () => {
+  const originalFetch = global.fetch;
+  const interpolations = [];
+  global.fetch = async (input) => {
+    const url = new URL(input);
+    interpolations.push(url.searchParams.get('interpolation'));
+    return {
+      ok: true,
+      json: async () => ({
+        samples: [{ locationId: 0, value: interpolations.length === 1 ? 12 : null }]
+      })
+    };
+  };
+
+  try {
+    const point = { latitude: 42.1234567, longitude: 11.1234567 };
+    const nearest = await getMarsElevations([point]);
+    const bilinear = await getMarsElevations([point], {
+      interpolation: 'RSP_Bilinear'
+    });
+
+    assert.deepEqual(nearest, [12]);
+    assert.deepEqual(bilinear, [null]);
+    assert.deepEqual(interpolations, [
+      'RSP_NearestNeighbor',
+      'RSP_Bilinear'
+    ]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

@@ -104,6 +104,57 @@ The returned raster values are shown in metres. Nearby labels are spaced to
 reduce overlap; denser areas may show fewer map labels than the number of
 places available in the endpoint selectors.
 
+### Experimental terrain-aware navigation
+
+The **Find a lower-risk terrain route** control requests a bounded grid of
+elevation samples from the same live NASA Mars Trek MOLA/HRSC DEM ImageServer.
+The backend reads that service's pixel size and spatial reference at runtime,
+then samples each grid location with the ImageServer `getSamples` operation.
+It does not download or bundle a global elevation raster. The service has
+roughly 200-metre native horizontal spacing near the equator; actual ground
+spacing varies with latitude. Choosing a finer planning grid does not add
+detail to the source elevation data.
+
+The backend analyzes slope, local elevation variation, and known hazard
+buffers, then uses A* search with eight-direction movement. Unknown/NoData
+cells and restricted terrain cannot be crossed, and diagonal moves cannot cut
+between blocked cells. The local distance calculation is an approximation on
+Mars; the output is intentionally labelled low confidence. MOLA cannot resolve
+small rocks, cracks, or astronaut-scale hazards, and the result is not
+certified for mission use.
+
+Grid spacing can be selected from 250 to 2,000 metres. To keep external requests
+bounded, the grid is capped at 55 rows by 55 columns; longer routes increase
+their spacing to fit. Elevation requests are batched, with a bounded in-memory
+sample cache. The grid bounds, terrain thresholds, hazard buffer, cost weights,
+NASA service URL, and cache limit are documented together in
+`backend/Services/TerrainNavigationConfig.js`.
+
+If a selected endpoint lands on unknown or restricted terrain, the planner
+first searches the normal grid, then expands the sampling area if needed to
+find the nearest traversable cell within 100 kilometres. The actual adjusted
+location and offset are returned and displayed. The expanded sample grid is
+still capped at 55 rows by 55 columns, so its planning cells become coarser
+(potentially several kilometres across); the result reports the actual
+resolution. Endpoints inside an explicitly supplied restricted hazard are
+rejected rather than moved.
+
+`POST /api/navigation/terrain` accepts `start` and `destination` objects with
+decimal-degree `latitude` and `longitude`, an optional `resolutionMeters`, and
+an optional `hazards` array. A circular hazard can provide `center`,
+`radiusMeters`, and `bufferMeters`; a polygon can provide at least three
+`{ "latitude": ..., "longitude": ... }` points. Invalid requests return HTTP
+400, a route blocked by hazards or unknown terrain returns HTTP 422, and
+NASA-service failures or areas with no valid elevation samples return HTTP 502.
+The response includes route coordinates,
+distance, terrain and slope summaries, sample coverage, data-source metadata,
+and explicit confidence limitations.
+
+Algorithm tests use synthetic grids so the pathfinder can be tested without
+relying on network availability or pretending that synthetic values are NASA
+data. The data-service tests mock NASA responses to verify metadata handling,
+sampling, and NoData behavior.
+
 ### Local demonstration mission data
 
 `backend/Data/marsData.json` contains the project's local example landing

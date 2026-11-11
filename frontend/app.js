@@ -664,6 +664,7 @@ molaElevationOverlay.show = false;
 const hazardLayerGroup = new GlobeLayerGroup();
 const routeLayerGroup = new GlobeLayerGroup();
 const poiLayerGroup = new GlobeLayerGroup();
+const terrainRouteLayerGroup = new GlobeLayerGroup();
 const placeNamesLayerGroup = new GlobeLayerGroup();
 const curiosityTraverseLayerGroup = new GlobeLayerGroup();
 const curiosityWaypointLayerGroup = new GlobeLayerGroup();
@@ -865,6 +866,8 @@ let activeTravelMode = 'suit';
 let currentRouteLine = null;
 let currentWaypoints = [];
 let currentRouteEndpoints = { departure: null, arrival: null };
+let terrainNavigationResult = null;
+let terrainRouteRequestId = 0;
 let endpointSiteKey = null;
 let currentSiteDetails = null;
 let loadedNASAPlaces = [];
@@ -873,6 +876,19 @@ let customEndpointLocations = { departure: null, arrival: null };
 let mapPickMode = null;
 let navAnimationTimer = null;
 let navMarker = null;
+
+function clearTerrainNavigationRoute() {
+  terrainRouteRequestId += 1;
+  terrainRouteLayerGroup.clearLayers();
+  if (calculateTerrainRouteBtn) calculateTerrainRouteBtn.disabled = false;
+  terrainNavigationResult = null;
+  const results = document.getElementById('terrainRouteResults');
+  if (results) results.hidden = true;
+  const stats = document.getElementById('terrainRouteStats');
+  if (stats) stats.textContent = '';
+  const confidence = document.getElementById('terrainRouteConfidence');
+  if (confidence) confidence.textContent = '';
+}
 
 function getRouteLocations(siteData) {
   const waypoints = siteData.safe_route || [];
@@ -1624,7 +1640,7 @@ function renderNASAPlaces(places, bounds, warnings) {
 }
 
 async function refreshNASAPlaceNames() {
-  if (!placeNamesEnabled || currentAppView !== 'layers') return;
+  if (!placeNamesEnabled) return;
 
   if (map.getZoom() < 3.2) {
     clearPlaceNameLayers();
@@ -1970,6 +1986,7 @@ function renderTurnByTurnSteps(waypoints, siteDetails, routeEndpoints) {
 // Route Loader & Telemetry
 async function loadMissionRoute() {
   stopNavigationSimulation();
+  clearTerrainNavigationRoute();
   const site = document.getElementById('siteSelect').value;
   try {
     const loadedPlan = await getMissionPlan(site);
@@ -2366,6 +2383,294 @@ if (recenterBtn) {
   });
 }
 
+function getTerrainRouteHazards() {
+  return (currentSiteDetails?.hazards || [])
+    .filter((hazard) =>
+      Array.isArray(hazard.coords) &&
+      hazard.coords.length === 2 &&
+      Number.isFinite(hazard.coords[0]) &&
+      Number.isFinite(hazard.coords[1])
+    )
+    .map((hazard) => ({
+      name: hazard.name,
+      type: hazard.type,
+      center: {
+        latitude: hazard.coords[0],
+        longitude: hazard.coords[1]
+      },
+      radiusMeters: hazard.radius_meters || 0,
+      bufferMeters: 350,
+      restricted: true
+    }));
+}
+
+async function fetchTerrainRoute(requestBody) {
+  const apiUrls = [];
+  if (window.location.protocol !== 'file:') {
+    apiUrls.push(new URL('/api/navigation/terrain', window.location.origin));
+  }
+  if (
+    window.location.protocol === 'file:' ||
+    ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+  ) {
+    const host =
+      window.location.protocol === 'file:'
+        ? 'localhost'
+        : window.location.hostname;
+    const ports = new Set([window.location.port, ...LOCAL_BACKEND_PORTS]);
+    for (const port of ports) {
+      if (port) apiUrls.push(new URL('/api/navigation/terrain', `http://${host}:${port}`));
+    }
+  }
+
+  const uniqueApiUrls = [
+    ...new Map(apiUrls.map((url) => [url.origin, url])).values()
+  ];
+  const backendUrls = [];
+  for (const apiUrl of uniqueApiUrls) {
+    try {
+      const healthUrl = new URL('/api/health', apiUrl.origin);
+      const response = await fetch(healthUrl, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(3000)
+      });
+      if (!response.ok) continue;
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) continue;
+      const health = await response.json();
+      if (health.success && health.service === 'mars-navigator') {
+        backendUrls.push(apiUrl);
+      }
+    } catch (error) {
+      if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+        continue;
+      }
+    }
+  }
+
+  if (backendUrls.length === 0) {
+    throw new Error(
+      'Could not connect to the Mars Navigator backend. Start it from the project folder with `npm start`, then retry.'
+    );
+  }
+
+  const failures = [];
+  for (const url of backendUrls) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(120000)
+      });
+      const responseText = await response.text();
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch {
+        failures.push(
+          `${url.origin}: backend returned an unreadable response (HTTP ${response.status}).`
+        );
+        continue;
+      }
+      if (response.ok && result.success && result.route) return result.route;
+      const message =
+        result.message || `Terrain route API returned HTTP ${response.status}.`;
+      if (response.status >= 400 && response.status < 500 &&
+          response.status !== 404) {
+        throw new Error(message);
+      }
+      failures.push(`${url.origin}: ${message}`);
+    } catch (error) {
+      if (error.name === 'AbortError' || error.name === 'TimeoutError') throw error;
+      if (error instanceof Error &&
+          !failures.some((failure) => failure.startsWith(`${url.origin}:`))) {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error(
+    failures.length
+      ? `The terrain route service is unavailable (${failures.join('; ')}).`
+      : 'The running Mars Navigator backend does not provide terrain routing. Restart it with `npm start` and retry.'
+  );
+}
+
+function renderTerrainNavigationResult(route) {
+  if (!Array.isArray(route.routeCoordinates) || route.routeCoordinates.length < 2) {
+    throw new Error('The terrain service returned an invalid route geometry.');
+  }
+  terrainRouteLayerGroup.clearLayers();
+  const routePositions = route.routeCoordinates.map((coordinate) =>
+    Cesium.Cartesian3.fromDegrees(
+      coordinate.longitude,
+      coordinate.latitude,
+      0,
+      MARS_ELLIPSOID
+    )
+  );
+  const routeEntity = viewer.entities.add({
+    polyline: {
+      positions: routePositions,
+      width: 7,
+      material: Cesium.Color.fromCssColorString('#f59e0b'),
+      arcType: Cesium.ArcType.GEODESIC,
+      clampToGround: true
+    }
+  });
+  routeEntity.mapPopup = createMapPopup('Experimental MOLA terrain route', [
+    ['Distance', `${route.totalDistanceKilometers.toFixed(2)} km`],
+    ['Average slope', `${route.averageSlopeDegrees.toFixed(1)}°`],
+    ['Maximum slope', `${route.maximumSlopeDegrees.toFixed(1)}°`],
+    ['Confidence', 'Low; MOLA cannot resolve foot-scale hazards.']
+  ]);
+  terrainRouteLayerGroup.addLayer(routeEntity);
+
+  [
+    { coordinate: route.start, label: 'A', name: 'Terrain route start' },
+    { coordinate: route.destination, label: 'B', name: 'Terrain route destination' }
+  ].forEach(({ coordinate, label, name }) => {
+    const marker = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(
+        coordinate.longitude,
+        coordinate.latitude,
+        1200,
+        MARS_ELLIPSOID
+      ),
+      point: {
+        pixelSize: 13,
+        color: Cesium.Color.fromCssColorString(
+          label === 'A' ? '#22c55e' : '#ef4444'
+        ),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2
+      },
+      label: {
+        text: label,
+        font: '500 12px Roboto, sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.fromCssColorString('#111827'),
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -18),
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        disableDepthTestDistance: 0
+      }
+    });
+    marker.mapPopup = createMapPopup(name, [
+      [
+        'Coordinates',
+        `${coordinate.latitude.toFixed(5)}°, ${coordinate.longitude.toFixed(5)}°`
+      ],
+      ['Route', 'Experimental NASA MOLA terrain-weighted route']
+    ]);
+    terrainRouteLayerGroup.addLayer(marker);
+  });
+
+  const routePoints = route.routeCoordinates.map((coordinate) => [
+    coordinate.latitude,
+    coordinate.longitude
+  ]);
+  routeEntity.getBounds = () => ({ points: routePoints });
+  currentRouteLine = routeEntity;
+  currentWaypoints = routePoints;
+  terrainNavigationResult = route;
+
+  const classCounts = route.terrainClassCounts;
+  const terrainStats = [
+    `Distance: ${route.totalDistanceKilometers.toFixed(2)} km`,
+    `Average / maximum slope: ${route.averageSlopeDegrees.toFixed(1)}° / ${route.maximumSlopeDegrees.toFixed(1)}°`,
+    `Route cells — preferred: ${classCounts.SAFE_CANDIDATE || 0}, caution: ${classCounts.CAUTION || 0}, high risk: ${classCounts.HIGH_RISK || 0}`,
+    `Sampled area coverage: ${route.terrainCoveragePercent.toFixed(1)}%`,
+    `Restricted cells excluded: ${route.restrictedCellsAvoided}; unknown cells blocked: ${route.unknownCellsBlocked}`,
+    `Effort index: ${route.estimatedEffort.index.toFixed(2)} (relative, not a certified energy estimate)`
+  ];
+  const adjustedEndpoints = Object.entries(route.endpointAdjustments || {})
+    .filter(([, distance]) => distance >= 1)
+    .map(([endpoint, distance]) =>
+      `${endpoint === 'startMeters' ? 'Start' : 'Destination'} moved ${distance.toFixed(0)} m to the nearest traversable terrain`
+    );
+  terrainStats.push(...adjustedEndpoints);
+  const results = document.getElementById('terrainRouteResults');
+  const stats = document.getElementById('terrainRouteStats');
+  const confidence = document.getElementById('terrainRouteConfidence');
+  if (results) results.hidden = false;
+  if (stats) stats.textContent = terrainStats.join(' · ');
+  if (confidence) {
+    confidence.textContent =
+      `LOW confidence · ${route.grid.resolutionMeters.toFixed(0)} m planning cells; ` +
+      `MOLA source resolution is about ${route.confidence.sourceResolutionMeters?.toFixed(0) ?? 'unknown'} m. ` +
+      route.confidence.reason;
+  }
+
+  document.getElementById('distVal').textContent =
+    route.totalDistanceKilometers.toFixed(2);
+  document.getElementById('timeVal').textContent = (
+    route.totalDistanceKilometers / Math.max(activeTravelSpeedKmH, 0.1)
+  ).toFixed(2);
+  document.getElementById('routeMetaDesc').textContent =
+    'Experimental terrain-weighted route · NASA MOLA';
+  renderTurnByTurnSteps(routePoints, currentSiteDetails, currentRouteEndpoints);
+  applyMapLayersForView(currentAppView);
+  map.fitBounds(routeEntity.getBounds(), { duration: 0.8 });
+}
+
+const calculateTerrainRouteBtn = document.getElementById(
+  'calculateTerrainRouteBtn'
+);
+calculateTerrainRouteBtn?.addEventListener('click', async () => {
+  const status = document.getElementById('terrainRouteStatus');
+  const departure = currentRouteEndpoints.departure;
+  const arrival = currentRouteEndpoints.arrival;
+  if (!departure?.coords || !arrival?.coords) {
+    if (status) status.textContent = 'Select a start and destination before calculating a route.';
+    return;
+  }
+
+  clearTerrainNavigationRoute();
+  applyMapLayersForView(currentAppView);
+  const requestId = ++terrainRouteRequestId;
+  calculateTerrainRouteBtn.disabled = true;
+  if (status) status.textContent = 'Sampling NASA MOLA elevations and searching for a lower-risk route…';
+  try {
+    const route = await fetchTerrainRoute({
+      start: {
+        latitude: departure.coords[0],
+        longitude: departure.coords[1]
+      },
+      destination: {
+        latitude: arrival.coords[0],
+        longitude: arrival.coords[1]
+      },
+      resolutionMeters: Number(
+        document.getElementById('terrainResolutionSelect').value
+      ),
+      hazards: getTerrainRouteHazards()
+    });
+    if (requestId !== terrainRouteRequestId) return;
+    renderTerrainNavigationResult(route);
+    if (status) {
+      const adjustments = Object.values(route.endpointAdjustments || {})
+        .filter((distance) => distance >= 1);
+      const adjustmentMessage = adjustments.length
+        ? ` · endpoint moved to traversable terrain (${adjustments.map((distance) => `${distance.toFixed(0)} m`).join(', ')})`
+        : '';
+      status.textContent =
+        `Experimental route found · ${route.totalDistanceKilometers.toFixed(2)} km · low confidence${adjustmentMessage}`;
+    }
+  } catch (error) {
+    if (requestId !== terrainRouteRequestId) return;
+    if (status) status.textContent = error.message;
+    console.error('Unable to calculate an experimental MOLA terrain route:', error);
+  } finally {
+    if (requestId === terrainRouteRequestId) {
+      calculateTerrainRouteBtn.disabled = false;
+    }
+  }
+});
+
 // Travel Mode Tabs (Suit / Rover / Scout)
 document.querySelectorAll('.mode-tab').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -2385,17 +2690,21 @@ function setMapLayerVisible(layer, visible) {
 }
 
 function applyMapLayersForView(view = currentAppView) {
-  const showRoute = view === 'map' || view === 'planner';
+  const showRoute = true;
+  const showTerrainRoute =
+    showRoute && Boolean(terrainNavigationResult);
+  const showSavedRoute = showRoute && !showTerrainRoute;
   const showHazards =
-    view === 'hazards' || (hazardsLayerEnabled && view === 'layers');
-  const showMola = view === 'layers' && molaLayerEnabled;
-  const showPlaceNames = view === 'layers' && placeNamesEnabled;
-  const showCuriosityImagery = view === 'layers' && curiosityImageryEnabled;
-  const showCuriosityRover = view === 'layers' && curiosityRoverEnabled;
-  const showInsightImagery = view === 'layers' && insightImageryEnabled;
+    view === 'hazards' || hazardsLayerEnabled;
+  const showMola = molaLayerEnabled;
+  const showPlaceNames = placeNamesEnabled;
+  const showCuriosityImagery = curiosityImageryEnabled;
+  const showCuriosityRover = curiosityRoverEnabled;
+  const showInsightImagery = insightImageryEnabled;
 
-  setMapLayerVisible(routeLayerGroup, showRoute);
-  setMapLayerVisible(poiLayerGroup, showRoute);
+  setMapLayerVisible(routeLayerGroup, showSavedRoute);
+  setMapLayerVisible(poiLayerGroup, showSavedRoute);
+  setMapLayerVisible(terrainRouteLayerGroup, showTerrainRoute);
   setMapLayerVisible(hazardLayerGroup, showHazards);
   setMapLayerVisible(molaElevationOverlay, showMola);
   setMapLayerVisible(placeNamesLayerGroup, showPlaceNames);
@@ -2443,6 +2752,7 @@ const togglePlaceNamesBtn = document.getElementById('togglePlaceNamesBtn');
 if (togglePlaceNamesBtn) {
   togglePlaceNamesBtn.addEventListener('click', () => {
     placeNamesEnabled = !placeNamesEnabled;
+    document.body.dataset.placeNames = String(placeNamesEnabled);
     updateLayerToggle(togglePlaceNamesBtn, placeNamesEnabled);
     const status = document.getElementById('placesStatus');
 
@@ -2577,11 +2887,6 @@ function updateSidebarForView(view) {
 function showAppView(view) {
   if (!Object.prototype.hasOwnProperty.call(APP_VIEW_SECTIONS, view)) return;
 
-  const previousView = currentAppView;
-  if (view === 'layers' && previousView !== 'layers' && placeNamesEnabled) {
-    clearPlaceNameLayers();
-  }
-
   setActiveAppView(view);
   updateSidebarForView(view);
 
@@ -2592,23 +2897,8 @@ function showAppView(view) {
 
   applyMapLayersForView(view);
 
-  if (view === 'planner' && currentRouteLine) {
-    map.fitBounds(currentRouteLine.getBounds(), {
-      paddingTopLeft: [420, 60],
-      paddingBottomRight: [60, 60]
-    });
-  }
-
-  if (view === 'layers' && placeNamesEnabled) {
-    lastPlaceNamesBounds = '';
+  if (placeNamesEnabled) {
     scheduleNASAPlaceNameRefresh();
-  } else if (view !== 'layers') {
-    clearTimeout(placeNamesRefreshTimer);
-    if (placeNamesRequest) {
-      placeNamesRequest.abort();
-      placeNamesRequest = null;
-    }
-    lastPlaceNamesBounds = '';
   }
 
   map.invalidateSize();

@@ -1,9 +1,9 @@
+const CONFIG = require('./TerrainNavigationConfig');
 const NASA_MARS_ARCGIS =
   'https://trek.nasa.gov/mars/trekarcgis/rest/services';
 const NASA_MOLA_IMAGE_SERVER =
   `${NASA_MARS_ARCGIS}/Mars_MOLA_blend200ppx_HRSC_DEM_clon0dd_200mpp_lzw/ImageServer`;
-const MIN_MOLA_ELEVATION_M = -8528;
-const MAX_MOLA_ELEVATION_M = 21230;
+const elevationSampleCache = new Map();
 
 const PLACE_LAYERS = [
   {
@@ -145,7 +145,11 @@ async function queryLayer(layer, bounds) {
     .filter(Boolean);
 }
 
-async function getMarsElevations(points) {
+async function getMarsElevations(points, options = {}) {
+  const interpolation = options.interpolation || 'RSP_NearestNeighbor';
+  if (!['RSP_NearestNeighbor', 'RSP_Bilinear'].includes(interpolation)) {
+    throw new TypeError('Elevation interpolation must be nearest-neighbour or bilinear.');
+  }
   if (
     !Array.isArray(points) ||
     points.some(
@@ -163,10 +167,26 @@ async function getMarsElevations(points) {
   }
 
   const elevations = new Array(points.length).fill(null);
+  const uncachedPoints = [];
+  const uncachedIndexes = [];
+  const cacheKeyFor = (point) =>
+    `${interpolation}:${point.latitude.toFixed(7)},${point.longitude.toFixed(7)}`;
+  points.forEach((point, index) => {
+    const key = cacheKeyFor(point);
+    if (elevationSampleCache.has(key)) {
+      elevations[index] = elevationSampleCache.get(key);
+    } else {
+      uncachedPoints.push(point);
+      uncachedIndexes.push(index);
+    }
+  });
   const batchSize = 100;
   const batches = [];
-  for (let start = 0; start < points.length; start += batchSize) {
-    batches.push({ start, points: points.slice(start, start + batchSize) });
+  for (let start = 0; start < uncachedPoints.length; start += batchSize) {
+    batches.push({
+      start,
+      points: uncachedPoints.slice(start, start + batchSize)
+    });
   }
 
   let nextBatch = 0;
@@ -182,7 +202,7 @@ async function getMarsElevations(points) {
         }),
         geometryType: 'esriGeometryMultipoint',
         returnFirstValueOnly: 'true',
-        interpolation: 'RSP_NearestNeighbor',
+        interpolation,
         f: 'json'
       }).toString();
 
@@ -201,7 +221,13 @@ async function getMarsElevations(points) {
         );
       }
 
+      const sampledIndexes = new Set();
       for (const sample of result.samples || []) {
+        if (sample.locationId === null || sample.locationId === undefined ||
+            sample.value === null || sample.value === undefined ||
+            String(sample.value).trim() === '') {
+          continue;
+        }
         const sampleIndex = Number(sample.locationId);
         const elevationM = Number(sample.value);
         if (
@@ -209,12 +235,29 @@ async function getMarsElevations(points) {
           sampleIndex >= 0 &&
           sampleIndex < batch.length &&
           Number.isFinite(elevationM) &&
-          elevationM >= MIN_MOLA_ELEVATION_M &&
-          elevationM <= MAX_MOLA_ELEVATION_M
+          elevationM >= CONFIG.nasaMola.minimumElevationMeters &&
+          elevationM <= CONFIG.nasaMola.maximumElevationMeters
         ) {
-          elevations[start + sampleIndex] = elevationM;
+          const pointIndex = uncachedIndexes[start + sampleIndex];
+          const point = points[pointIndex];
+          const key = cacheKeyFor(point);
+          elevations[pointIndex] = elevationM;
+          sampledIndexes.add(sampleIndex);
+          elevationSampleCache.delete(key);
+          elevationSampleCache.set(key, elevationM);
+          while (
+            elevationSampleCache.size > CONFIG.nasaMola.sampleCacheSize
+          ) {
+            elevationSampleCache.delete(elevationSampleCache.keys().next().value);
+          }
         }
       }
+      batch.forEach((point, sampleIndex) => {
+        if (sampledIndexes.has(sampleIndex)) return;
+        const key = cacheKeyFor(point);
+        elevationSampleCache.delete(key);
+        elevationSampleCache.set(key, null);
+      });
     }
   }
 

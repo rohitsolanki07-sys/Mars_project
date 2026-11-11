@@ -6,6 +6,7 @@ const fs = require('fs');
 const { exec } = require('child_process');
 const marsPlacesService = require('./Services/MarsPlacesService');
 const marsRoverService = require('./Services/MarsRoverService');
+const marsTerrainNavigationService = require('./Services/MarsTerrainNavigationService');
 
 // Create the web server and choose a preferred port. If that port is busy,
 // the server will try the other common development ports listed below.
@@ -210,6 +211,33 @@ app.get('/api/curiosity', async (req, res) => {
     return res.status(502).json({
       success: false,
       message: 'NASA Mars Trek Curiosity data is temporarily unavailable.'
+    });
+  }
+});
+
+// Calculate an experimental low-risk path using NASA MOLA elevations.
+app.post('/api/navigation/terrain', async (req, res) => {
+  try {
+    const result =
+      await marsTerrainNavigationService.calculateTerrainAwareRoute(req.body);
+    res.set('Cache-Control', 'no-store');
+    return res.json({ success: true, route: result });
+  } catch (err) {
+    const statusCode =
+      err instanceof TypeError || err instanceof RangeError
+        ? 400
+        : err.message.startsWith('No safe route exists') ||
+            err.message.startsWith('No traversable terrain was found') ||
+            err.message.includes('starting coordinate') ||
+            err.message.includes('destination has missing or restricted')
+          ? 422
+          : 502;
+    if (statusCode === 502) {
+      console.error('ERROR calculating NASA MOLA terrain route:', err.message);
+    }
+    return res.status(statusCode).json({
+      success: false,
+      message: err.message || 'The terrain-aware route could not be calculated.'
     });
   }
 });

@@ -181,6 +181,19 @@
         </form>
         <div id="coordinateStatus" class="map-pick-status" role="status" aria-live="polite"></div>
       </details>
+      <div class="terrain-route-controls">
+        <label for="terrainResolutionSelect">Terrain grid spacing</label>
+        <select id="terrainResolutionSelect" aria-label="Terrain grid spacing">
+          <option value="1000">Coarse · 1,000 m</option>
+          <option value="500" selected>Standard · 500 m</option>
+          <option value="250">Detailed · 250 m</option>
+        </select>
+        <button type="button" class="primary-nav-btn" id="calculateTerrainRouteBtn">
+          Find a lower-risk terrain route
+        </button>
+        <p id="terrainRouteStatus" class="map-pick-status" role="status" aria-live="polite"></p>
+        <p class="terrain-safety-note">Experimental planning aid only. MOLA cannot detect small rocks or astronaut-scale hazards. Not certified for mission use.</p>
+      </div>
     </div>
 
     <!-- Scrollable Route Summary, Telemetry, Steps & Hazards -->
@@ -285,6 +298,11 @@
           <div class="eta-dist">(<span id="distVal">--</span> km)</div>
         </div>
         <div class="eta-meta" id="routeMetaDesc">Fastest safe terrain path avoiding steep scarps</div>
+        <div id="terrainRouteResults" class="terrain-route-results" hidden>
+          <div class="section-title">TERRAIN ROUTE ESTIMATES</div>
+          <p id="terrainRouteStats"></p>
+          <p id="terrainRouteConfidence" class="terrain-safety-note"></p>
+        </div>
         <div class="eta-actions">
           <button id="startNavBtn" class="primary-nav-btn">
             <span>▶</span> Start EVA Navigation

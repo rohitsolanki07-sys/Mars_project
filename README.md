@@ -57,13 +57,50 @@ Run the backend tests with `npm test`.
 - `GET /api/places?bbox=west,south,east,north` returns NASA Mars Trek place names for a map area.
 - `GET /api/curiosity` returns Curiosity's recorded traverse and named stops from NASA Mars Trek.
 - `GET /api/elevation?points=latitude,longitude` returns MOLA elevation samples for custom coordinates.
+- `POST /api/navigation/terrain` samples NASA MOLA elevations and calculates an experimental lower-risk route.
 
 Supported site keys are `jezero_crater` and `mount_sharp`.
 
 The departure and arrival menus include saved mission waypoints and NASA place
 names returned for the current map area. Use **Pick start on map** or **Pick
-destination on map** to choose custom coordinates. Custom routes are straight
-point-to-point estimates; terrain and hazards are not automatically routed.
+destination on map** to choose custom coordinates. The standard mission summary
+is still a direct point-to-point estimate. To request an experimental terrain-
+aware path between the selected endpoints, choose a grid spacing and click
+**Find a lower-risk terrain route**. It uses NASA Mars Trek's live elevation
+service and the selected mission site's known hazards.
+If an endpoint falls on unknown or restricted terrain, the planner can move it
+to the nearest traversable sampled cell up to 100 km away. The adjusted
+location and distance are shown with the result. Long-range searches use the
+bounded terrain grid and may therefore have coarser planning resolution.
+
+The terrain route API accepts latitude and longitude in decimal degrees:
+
+```json
+{
+  "start": { "latitude": 18.4447, "longitude": 77.4508 },
+  "destination": { "latitude": 18.52, "longitude": 77.35 },
+  "resolutionMeters": 500,
+  "hazards": [
+    {
+      "name": "Example restricted area",
+      "center": { "latitude": 18.48, "longitude": 77.4 },
+      "radiusMeters": 250,
+      "bufferMeters": 350,
+      "restricted": true
+    }
+  ]
+}
+```
+
+The response includes the route coordinates, distance, terrain-cost estimate,
+elevation and slope summaries, raster coverage, and confidence caveats. Invalid
+requests return HTTP 400, an unavailable safe route or traversable endpoint
+returns HTTP 422, and NASA-service failures return HTTP 502. The grid is
+bounded to 55 by 55 cells; unknown elevation cells are not traversed. This
+prototype is low-confidence planning support, not safety-certified or
+operational guidance.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the elevation source, algorithm
+assumptions, resolution limits, and configuration.
 
 ## Notes
 
