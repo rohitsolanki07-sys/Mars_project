@@ -3339,5 +3339,9 @@ updateLayerToggle(toggleCuriosityImageryBtn, curiosityImageryEnabled);
 updateLayerToggle(toggleCuriosityRoverBtn, curiosityRoverEnabled);
 updateLayerToggle(toggleInsightImageryBtn, insightImageryEnabled);
 showAppView('planner');
+const siteSelect = document.getElementById('siteSelect');
+if (siteSelect) {
+  siteSelect.value = 'mount_sharp';
+}
 scheduleNASAPlaceNameRefresh();
 loadMissionRoute();
