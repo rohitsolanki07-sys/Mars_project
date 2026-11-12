@@ -3,7 +3,7 @@ const {
   calculateRoute,
   isValidCoordinate
 } = require('./MarsTerrainAnalysis');
-const { loadMarsMolaGrid } = require('./MarsTerrainDataService');
+const marsTerrainDataService = require('./MarsTerrainDataService');
 
 function validateHazards(hazards) {
   if (hazards === undefined) return [];
@@ -36,7 +36,7 @@ async function calculateTerrainAwareRoute(request) {
     resolutionMeters: request.resolutionMeters,
     interpolation: request.interpolation
   };
-  const terrain = await loadMarsMolaGrid(
+  const terrain = await marsTerrainDataService.loadMarsMolaGrid(
     request.start,
     request.destination,
     options
@@ -45,7 +45,10 @@ async function calculateTerrainAwareRoute(request) {
   try {
     route = calculateRoute(terrain.grid, hazards, terrain.metadata);
   } catch (error) {
-    if (!error.message.startsWith('No traversable terrain was found within')) {
+    if (
+      !error.message.startsWith('No traversable terrain was found within') &&
+      !error.message.startsWith('No safe route exists')
+    ) {
       throw error;
     }
   }
@@ -58,7 +61,7 @@ async function calculateTerrainAwareRoute(request) {
     return route;
   }
 
-  const expandedTerrain = await loadMarsMolaGrid(
+  const expandedTerrain = await marsTerrainDataService.loadMarsMolaGrid(
     request.start,
     request.destination,
     {

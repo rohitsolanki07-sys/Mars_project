@@ -72,9 +72,15 @@ service and the selected mission site's known hazards.
 When a terrain route is found, the planner also shows modeled review flags and
 can download an offline text briefing with sampled route points and limitations.
 If an endpoint falls on unknown or restricted terrain, the planner can move it
-to the nearest traversable sampled cell up to 100 km away. The adjusted
-location and distance are shown with the result. Long-range searches use the
-bounded terrain grid and may therefore have coarser planning resolution.
+to the nearest traversable sampled cell. On local grids this search is capped
+at 5 km; on a coarse grid, it can extend up to one cell so globally separated
+coordinates can connect to sampled terrain. If the first grid has no
+connected path, it retries with a wider grid. The adjusted location and
+distance are shown with the result. Large searches use the bounded terrain
+grid and may therefore have coarser planning resolution. For these coarse
+grids, terrain-relief thresholds scale with cell spacing; the result remains
+low confidence and does not assess terrain between sampled cells. Steep
+slopes, restricted hazards, and unknown cells still block the route.
 
 The terrain route API accepts latitude and longitude in decimal degrees:
 

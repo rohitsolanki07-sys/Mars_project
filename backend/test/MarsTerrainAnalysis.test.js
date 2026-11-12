@@ -74,6 +74,23 @@ test('slope uses Mars ground distances and classifies steep cells as restricted'
   assert.equal(center.state, TERRAIN_STATES.RESTRICTED);
 });
 
+test('a smooth incline is classified by slope, not mistaken for roughness', () => {
+  const grid = flatGrid(7, 7, 500);
+  for (let row = 0; row < grid.rows; row += 1) {
+    for (let column = 0; column < grid.columns; column += 1) {
+      grid.elevations[row * grid.columns + column] =
+        column * 50 + row * 30;
+    }
+  }
+
+  const center = analyzeTerrain(grid)[3 * grid.columns + 3];
+
+  assert.ok(center.slopeDegrees > 5 && center.slopeDegrees < 10);
+  assert.ok(center.roughnessMeters < 0.01);
+  assert.ok(center.maxElevationChangeMeters < 0.01);
+  assert.equal(center.state, TERRAIN_STATES.CAUTION);
+});
+
 test('local roughness identifies high-relief cells without inventing obstacle data', () => {
   const grid = flatGrid(7, 7, 1000);
   grid.elevations[3 * grid.columns + 3] = 100;
@@ -227,7 +244,7 @@ test('rejects invalid coordinates and out-of-range raster metadata cleanly', () 
   );
 });
 
-test('expands the terrain grid to cover the configured 100 km endpoint search', () => {
+test('expands the terrain grid to cover the configured 5 km endpoint search', () => {
   const coordinate = { latitude: 0, longitude: 0 };
   const grid = createLocalGridGeometry(coordinate, coordinate, {
     resolutionMeters: 500,
@@ -244,12 +261,39 @@ test('expands the terrain grid to cover the configured 100 km endpoint search', 
   const distanceToEast = Math.abs(farEast.longitude) *
     Math.PI / 180 * CONFIG.marsEquatorialRadiusMeters;
 
-  assert.equal(CONFIG.endpoints.maximumSnapDistanceMeters, 100000);
-  assert.ok(distanceToWest >= CONFIG.endpoints.maximumSnapDistanceMeters);
-  assert.ok(distanceToEast >= CONFIG.endpoints.maximumSnapDistanceMeters);
+  assert.equal(CONFIG.endpoints.maximumSnapDistanceMeters, 5000);
+  assert.ok(
+    distanceToWest >= CONFIG.endpoints.maximumSnapDistanceMeters - 0.01
+  );
+  assert.ok(
+    distanceToEast >= CONFIG.endpoints.maximumSnapDistanceMeters - 0.01
+  );
   assert.ok(grid.rows <= CONFIG.grid.maximumDimension);
   assert.ok(grid.columns <= CONFIG.grid.maximumDimension);
-  assert.ok(grid.resolutionMeters > 2000);
+  assert.ok(grid.resolutionMeters >= CONFIG.grid.defaultResolutionMeters);
+});
+
+test('finds a coarse low-risk route between globally separated coordinates', () => {
+  const start = { latitude: 62, longitude: -145 };
+  const destination = { latitude: -54, longitude: 112 };
+  const grid = createLocalGridGeometry(start, destination, {
+    resolutionMeters: CONFIG.grid.maximumResolutionMeters
+  });
+  grid.elevations = new Array(grid.rows * grid.columns).fill(0);
+
+  const result = calculateRoute(grid);
+
+  assert.equal(result.status, 'ROUTE_FOUND');
+  assert.ok(result.totalDistanceKilometers > 5000);
+  assert.ok(result.grid.resolutionMeters > CONFIG.grid.maximumResolutionMeters);
+  assert.ok(
+    result.endpointAdjustments.startMeters <= result.grid.resolutionMeters
+  );
+  assert.ok(
+    result.endpointAdjustments.destinationMeters <= result.grid.resolutionMeters
+  );
+  assert.ok(result.terrainThresholdScaleFactor > 1);
+  assert.match(result.confidence.reason, /fine terrain between coarse samples is not assessed/);
 });
 
 test('does not report a zero-length route when distant endpoints snap to one cell', () => {
@@ -327,6 +371,31 @@ test('local and raster coordinate conversion respect Mars latitude and row direc
     ),
     { row: 69, column: 80 }
   );
+});
+
+test('global route grids keep sampled latitudes within the valid polar range', () => {
+  for (const [start, destination] of [
+    [
+      { latitude: 90, longitude: 10 },
+      { latitude: 88, longitude: 100 }
+    ],
+    [
+      { latitude: -90, longitude: -10 },
+      { latitude: -88, longitude: 120 }
+    ]
+  ]) {
+    const grid = createLocalGridGeometry(start, destination, {
+      resolutionMeters: CONFIG.grid.maximumResolutionMeters
+    });
+
+    for (let row = 0; row < grid.rows; row += 1) {
+      for (let column = 0; column < grid.columns; column += 1) {
+        const coordinate = gridCellToCoordinate(grid, row, column);
+        assert.ok(coordinate.latitude >= -90 && coordinate.latitude <= 90);
+        assert.ok(Math.abs(coordinate.latitude) < 90);
+      }
+    }
+  }
 });
 
 test('A* path cost matches Dijkstra on the same small weighted grid', () => {

@@ -149,12 +149,18 @@ spacing varies with latitude. Choosing a finer planning grid does not add
 detail to the source elevation data.
 
 The backend analyzes slope, local elevation variation, and known hazard
-buffers, then uses A* search with eight-direction movement. Unknown/NoData
-cells and restricted terrain cannot be crossed, and diagonal moves cannot cut
-between blocked cells. The local distance calculation is an approximation on
-Mars; the output is intentionally labelled low confidence. MOLA cannot resolve
-small rocks, cracks, or astronaut-scale hazards, and the result is not
-certified for mission use.
+buffers, then uses A* search with eight-direction movement. Local relief is
+measured after removing the neighborhood's estimated planar slope, so a smooth
+incline is evaluated as slope rather than incorrectly treated as roughness.
+Roughness and elevation-change thresholds scale with planning-cell spacing to
+avoid applying metre-scale limits to coarse cells on long routes. Steep slopes,
+restricted hazards, and unknown/NoData cells remain blocked, and diagonal
+moves cannot cut between blocked cells. The local distance calculation is an
+approximation on Mars; the output is intentionally labelled low confidence.
+MOLA cannot resolve small rocks, cracks, or astronaut-scale hazards, and the
+result is not certified for mission use. The slope, roughness,
+elevation-change, and cost thresholds are prototype assumptions, not NASA
+human-traverse standards or NASA-endorsed route recommendations.
 
 Grid spacing can be selected from 250 to 2,000 metres. To keep external requests
 bounded, the grid is capped at 55 rows by 55 columns; longer routes increase
@@ -165,12 +171,16 @@ NASA service URL, and cache limit are documented together in
 
 If a selected endpoint lands on unknown or restricted terrain, the planner
 first searches the normal grid, then expands the sampling area if needed to
-find the nearest traversable cell within 100 kilometres. The actual adjusted
-location and offset are returned and displayed. The expanded sample grid is
-still capped at 55 rows by 55 columns, so its planning cells become coarser
-(potentially several kilometres across); the result reports the actual
-resolution. Endpoints inside an explicitly supplied restricted hazard are
-rejected rather than moved.
+find the nearest traversable cell. For local grids, this search is capped at
+5 kilometres; for coarse long-distance grids, it can extend up to one cell so
+widely separated coordinates can connect to sampled terrain. The actual
+adjusted location and offset are returned and displayed. The expanded sample
+grid is still capped at 55 rows by 55 columns, so its planning cells become
+coarser when the route area reaches the grid limit; the result reports the
+actual resolution. A disconnected initial route also triggers a retry with a
+wider grid. Endpoints inside an explicitly supplied restricted hazard are
+rejected rather than moved. Terrain between coarse samples is not evaluated;
+these routes remain low-confidence planning support.
 
 `POST /api/navigation/terrain` accepts `start` and `destination` objects with
 decimal-degree `latitude` and `longitude`, an optional `resolutionMeters`, and

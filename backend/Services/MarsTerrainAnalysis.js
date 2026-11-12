@@ -1,6 +1,7 @@
 const CONFIG = require('./TerrainNavigationConfig');
 
 const DEG_TO_RAD = Math.PI / 180;
+const MAX_GRID_LATITUDE = 89.999;
 const TERRAIN_STATES = Object.freeze({
   SAFE: 'SAFE_CANDIDATE',
   CAUTION: 'CAUTION',
@@ -151,8 +152,14 @@ function gridCellToCoordinate(grid, row, column) {
   const localY = grid.maxY - row * grid.resolutionMeters;
   return {
     latitude:
-      grid.centerLatitude +
-      localY / grid.latitudeScale / DEG_TO_RAD,
+      Math.max(
+        -MAX_GRID_LATITUDE,
+        Math.min(
+          MAX_GRID_LATITUDE,
+          grid.centerLatitude +
+            localY / grid.latitudeScale / DEG_TO_RAD
+        )
+      ),
     longitude:
       ((grid.centerLongitude +
         localX / grid.longitudeScale / DEG_TO_RAD +
@@ -261,6 +268,22 @@ function analyzeTerrain(grid, hazards = []) {
     blockedByHazard: false
   }));
   const terrainConfig = CONFIG.terrain;
+  const thresholdScale = Math.max(
+    1,
+    grid.resolutionMeters / CONFIG.grid.defaultResolutionMeters
+  );
+  const roughnessThresholds = Object.fromEntries(
+    Object.entries(terrainConfig.roughnessMeters).map(([level, threshold]) => [
+      level,
+      threshold * thresholdScale
+    ])
+  );
+  const elevationChangeThresholds = Object.fromEntries(
+    Object.entries(terrainConfig.elevationChangeMeters).map(([level, threshold]) => [
+      level,
+      threshold * thresholdScale
+    ])
+  );
   const roughnessRadius =
     terrainConfig.roughnessNeighborhoodRadiusCells;
 
@@ -301,13 +324,16 @@ function analyzeTerrain(grid, hazards = []) {
             column + columnOffset
           );
           if (sample === null) continue;
-          sampleValues.push(sample);
-          if (rowOffset !== 0 || columnOffset !== 0) {
-            maxElevationChangeMeters = Math.max(
-              maxElevationChangeMeters,
-              Math.abs(sample - elevation)
-            );
-          }
+          const expectedElevation =
+            elevation +
+            dzdx * columnOffset * eastSpacing +
+            dzdy * rowOffset * grid.resolutionMeters;
+          const localRelief = sample - expectedElevation;
+          sampleValues.push(localRelief);
+          maxElevationChangeMeters = Math.max(
+            maxElevationChangeMeters,
+            Math.abs(localRelief)
+          );
         }
       }
 
@@ -342,21 +368,21 @@ function analyzeTerrain(grid, hazards = []) {
     const elevationChange = cell.maxElevationChangeMeters;
     if (
       slope > terrainConfig.slopeDegrees.highRisk ||
-      roughness > terrainConfig.roughnessMeters.highRisk ||
-      elevationChange > terrainConfig.elevationChangeMeters.highRisk ||
+      roughness > roughnessThresholds.highRisk ||
+      elevationChange > elevationChangeThresholds.highRisk ||
       cell.blockedByHazard
     ) {
       cell.state = TERRAIN_STATES.RESTRICTED;
     } else if (
       slope > terrainConfig.slopeDegrees.caution ||
-      roughness > terrainConfig.roughnessMeters.caution ||
-      elevationChange > terrainConfig.elevationChangeMeters.caution
+      roughness > roughnessThresholds.caution ||
+      elevationChange > elevationChangeThresholds.caution
     ) {
       cell.state = TERRAIN_STATES.HIGH_RISK;
     } else if (
       slope > terrainConfig.slopeDegrees.preferred ||
-      roughness > terrainConfig.roughnessMeters.preferred ||
-      elevationChange > terrainConfig.elevationChangeMeters.preferred
+      roughness > roughnessThresholds.preferred ||
+      elevationChange > elevationChangeThresholds.preferred
     ) {
       cell.state = TERRAIN_STATES.CAUTION;
     }
@@ -366,10 +392,10 @@ function analyzeTerrain(grid, hazards = []) {
       weights.slope *
         Math.min(slope / terrainConfig.slopeDegrees.highRisk, 1) +
       weights.roughness *
-        Math.min(roughness / terrainConfig.roughnessMeters.highRisk, 1) +
+        Math.min(roughness / roughnessThresholds.highRisk, 1) +
       weights.elevationChange *
         Math.min(
-          elevationChange / terrainConfig.elevationChangeMeters.highRisk,
+          elevationChange / elevationChangeThresholds.highRisk,
           1
         ) +
       weights.hazard * cell.hazardPenalty;
@@ -483,7 +509,10 @@ function coordinateInsideRestrictedHazard(grid, coordinate, hazards) {
 }
 
 function findNearestTraversableCell(grid, cells, coordinate) {
-  const maximumDistance = CONFIG.endpoints.maximumSnapDistanceMeters;
+  const maximumDistance = Math.max(
+    CONFIG.endpoints.maximumSnapDistanceMeters,
+    grid.resolutionMeters
+  );
   const originCell = coordinateToGridCell(grid, coordinate);
   const searchRadius = Math.ceil(maximumDistance / grid.resolutionMeters);
   let nearest = null;
@@ -777,7 +806,7 @@ function calculateRoute(grid, hazards = [], metadata = {}) {
   const start = findNearestTraversableCell(grid, cells, requestedStart);
   if (!start) {
     throw new Error(
-      `No traversable terrain was found within ${CONFIG.endpoints.maximumSnapDistanceMeters} metres of the starting coordinate.`
+      `No traversable terrain was found within ${Math.max(CONFIG.endpoints.maximumSnapDistanceMeters, grid.resolutionMeters)} metres of the starting coordinate.`
     );
   }
   const destination = findNearestTraversableCell(
@@ -787,7 +816,7 @@ function calculateRoute(grid, hazards = [], metadata = {}) {
   );
   if (!destination) {
     throw new Error(
-      `No traversable terrain was found within ${CONFIG.endpoints.maximumSnapDistanceMeters} metres of the destination.`
+      `No traversable terrain was found within ${Math.max(CONFIG.endpoints.maximumSnapDistanceMeters, grid.resolutionMeters)} metres of the destination.`
     );
   }
   if (
@@ -918,13 +947,17 @@ function calculateRoute(grid, hazards = [], metadata = {}) {
       level: 'LOW',
       score: 0.25,
       reason:
-        'MOLA is a regional elevation model and cannot detect foot-scale rocks, cracks, or other small hazards. This experimental route is not astronaut-certified.',
+        `MOLA cannot detect foot-scale hazards. Terrain-relief thresholds are scaled by ${Math.max(1, grid.resolutionMeters / CONFIG.grid.defaultResolutionMeters).toFixed(1)}x for this grid spacing; fine terrain between coarse samples is not assessed. This experimental route is not astronaut-certified.`,
       sourceResolutionMeters: metadata.sourceResolutionMeters ?? null,
       planningResolutionMeters: grid.resolutionMeters,
       nominalHorizontalUncertaintyMeters:
         grid.resolutionMeters / 2 +
         (metadata.sourceResolutionMeters ?? 0) / 2
     },
+    terrainThresholdScaleFactor: Math.max(
+      1,
+      grid.resolutionMeters / CONFIG.grid.defaultResolutionMeters
+    ),
     grid: {
       rows: grid.rows,
       columns: grid.columns,

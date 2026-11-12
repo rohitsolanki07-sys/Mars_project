@@ -8,7 +8,7 @@ module.exports = Object.freeze({
     paddingCells: 3
   }),
   endpoints: Object.freeze({
-    maximumSnapDistanceMeters: 100000
+    maximumSnapDistanceMeters: 5000
   }),
   terrain: Object.freeze({
     slopeDegrees: Object.freeze({
