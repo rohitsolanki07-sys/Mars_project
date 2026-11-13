@@ -239,7 +239,7 @@ function getAxisGradient(center, before, after, spacing) {
   return null;
 }
 
-function analyzeTerrain(grid, hazards = []) {
+function analyzeTerrain(grid, hazards = [], geologyZones = []) {
   const totalCells = grid.rows * grid.columns;
   if (
     grid.elevations.length !== totalCells ||
@@ -257,6 +257,9 @@ function analyzeTerrain(grid, hazards = []) {
   if (!Array.isArray(hazards)) {
     throw new TypeError('Hazards must be supplied as an array.');
   }
+  if (!Array.isArray(geologyZones)) {
+    throw new TypeError('Geology zones must be supplied as an array.');
+  }
 
   const cellAnalysis = Array.from({ length: totalCells }, () => ({
     slopeDegrees: null,
@@ -265,6 +268,8 @@ function analyzeTerrain(grid, hazards = []) {
     state: TERRAIN_STATES.UNKNOWN,
     normalizedPenalty: 0,
     hazardPenalty: 0,
+    geologyPenalty: 0,
+    geologyCategories: [],
     blockedByHazard: false
   }));
   const terrainConfig = CONFIG.terrain;
@@ -355,12 +360,15 @@ function analyzeTerrain(grid, hazards = []) {
         state: TERRAIN_STATES.SAFE,
         normalizedPenalty: 0,
         hazardPenalty: 0,
+        geologyPenalty: 0,
+        geologyCategories: [],
         blockedByHazard: false
       };
     }
   }
 
   applyHazards(grid, cellAnalysis, hazards);
+  applyGeologyZones(grid, cellAnalysis, geologyZones);
   cellAnalysis.forEach((cell) => {
     if (cell.state === TERRAIN_STATES.UNKNOWN) return;
     const slope = cell.slopeDegrees;
@@ -398,10 +406,84 @@ function analyzeTerrain(grid, hazards = []) {
           elevationChange / elevationChangeThresholds.highRisk,
           1
         ) +
-      weights.hazard * cell.hazardPenalty;
+      weights.hazard * cell.hazardPenalty +
+      cell.geologyPenalty;
   });
 
   return cellAnalysis;
+}
+
+function applyGeologyZones(grid, cells, zones) {
+  if (zones.length > 1000) {
+    throw new RangeError('No more than 1,000 geology zones may be used for a route.');
+  }
+  for (const zone of zones) {
+    if (
+      !zone ||
+      typeof zone !== 'object' ||
+      !Array.isArray(zone.polygon) ||
+      zone.polygon.length < 3
+    ) {
+      throw new TypeError('Each geology zone must include a polygon with at least three points.');
+    }
+    const preference = zone.preference ?? 0;
+    if (
+      !Number.isFinite(preference) ||
+      preference < CONFIG.geologyPreferences.minimumCostAdjustment ||
+      preference > CONFIG.geologyPreferences.maximumCostAdjustment
+    ) {
+      throw new RangeError('Geology-zone cost adjustments are outside the configured range.');
+    }
+    const polygon = zone.polygon.map((coordinate) => {
+      if (!isValidCoordinate(coordinate)) {
+        throw new TypeError('Geology-zone polygon coordinates must be valid.');
+      }
+      return toLocalPosition(grid, coordinate);
+    });
+    const isHazard = zone.category === 'hazard';
+
+    for (let row = 0; row < grid.rows; row += 1) {
+      for (let column = 0; column < grid.columns; column += 1) {
+        const index = row * grid.columns + column;
+        const cell = cells[index];
+        if (cell.state === TERRAIN_STATES.UNKNOWN) continue;
+        const local = {
+          x: grid.minX + column * grid.resolutionMeters,
+          y: grid.maxY - row * grid.resolutionMeters
+        };
+        if (!pointInPolygon(local, polygon)) continue;
+        if (isHazard) {
+          cell.blockedByHazard = true;
+          cell.hazardPenalty = 1;
+          cell.state = TERRAIN_STATES.RESTRICTED;
+        } else {
+          cell.geologyPenalty = Math.min(cell.geologyPenalty, preference);
+        }
+        if (zone.category && !cell.geologyCategories.includes(zone.category)) {
+          cell.geologyCategories.push(zone.category);
+        }
+      }
+    }
+  }
+}
+
+function thermalTransitionPenalty(colors, fromIndex, toIndex) {
+  if (!Array.isArray(colors)) return 0;
+  const from = colors[fromIndex];
+  const to = colors[toIndex];
+  if (
+    !Array.isArray(from) ||
+    !Array.isArray(to) ||
+    from.length !== 3 ||
+    to.length !== 3
+  ) {
+    return 0;
+  }
+  const squaredDifference = from.reduce(
+    (sum, channel, index) => sum + (channel - to[index]) ** 2,
+    0
+  );
+  return Math.sqrt(squaredDifference / (3 * 255 ** 2));
 }
 
 function applyHazards(grid, cells, hazards) {
@@ -483,9 +565,14 @@ function toLocalPosition(grid, coordinate) {
   };
 }
 
-function coordinateInsideRestrictedHazard(grid, coordinate, hazards) {
+function coordinateInsideRestrictedHazard(
+  grid,
+  coordinate,
+  hazards,
+  geologyZones = []
+) {
   const local = toLocalPosition(grid, coordinate);
-  return hazards.some((hazard) => {
+  const insideHazard = hazards.some((hazard) => {
     if (hazard.restricted === false) return false;
     const bufferMeters = hazard.bufferMeters ?? CONFIG.hazards.defaultBufferMeters;
     const radiusMeters = hazard.radiusMeters ?? hazard.radius_meters ?? 0;
@@ -504,6 +591,14 @@ function coordinateInsideRestrictedHazard(grid, coordinate, hazards) {
     return (
       Math.hypot(local.x - centerLocal.x, local.y - centerLocal.y) <=
       radiusMeters + bufferMeters
+    );
+  });
+  if (insideHazard) return true;
+  return geologyZones.some((zone) => {
+    if (zone.category !== 'hazard' || !Array.isArray(zone.polygon)) return false;
+    return pointInPolygon(
+      local,
+      zone.polygon.map((point) => toLocalPosition(grid, point))
     );
   });
 }
@@ -640,7 +735,7 @@ function isCellTraversable(cell) {
   );
 }
 
-function findLowestCostPath(grid, cells) {
+function findLowestCostPath(grid, cells, thermalColors) {
   const start = grid.startCell;
   const destination = grid.destinationCell;
   const startIndex = start.row * grid.columns + start.column;
@@ -718,10 +813,12 @@ function findLowestCostPath(grid, cells) {
       const penalty =
         (cells[current.index].normalizedPenalty +
           nextCell.normalizedPenalty) /
-        2;
+        2 +
+        CONFIG.costWeights.thermalTransition *
+          thermalTransitionPenalty(thermalColors, current.index, nextIndex);
       const tentativeScore =
         gScore[current.index] +
-        distance * (1 + Math.max(0, penalty));
+        distance * Math.max(0.5, 1 + penalty);
       if (tentativeScore >= gScore[nextIndex]) continue;
       parent[nextIndex] = current.index;
       gScore[nextIndex] = tentativeScore;
@@ -741,7 +838,7 @@ function heuristic(grid, from, to) {
     Math.hypot(
       (to.column - from.column) * grid.resolutionMeters,
       (to.row - from.row) * grid.resolutionMeters
-    ) || 0
+    ) * 0.5 || 0
   );
 }
 
@@ -779,8 +876,30 @@ function surfaceDistanceMeters(start, destination) {
   );
 }
 
-function calculateRoute(grid, hazards = [], metadata = {}) {
-  const cells = analyzeTerrain(grid, hazards);
+function calculateRoute(
+  grid,
+  hazards = [],
+  metadata = {},
+  environment = {}
+) {
+  const geologyZones = environment.geologyZones || [];
+  const thermalColors = environment.thermalInertiaColors;
+  if (
+    thermalColors !== undefined &&
+    (!Array.isArray(thermalColors) ||
+      thermalColors.length !== grid.rows * grid.columns ||
+      thermalColors.some((color) =>
+        color !== null &&
+        (!Array.isArray(color) ||
+          color.length !== 3 ||
+          color.some((channel) =>
+            !Number.isInteger(channel) || channel < 0 || channel > 255
+          ))
+      ))
+  ) {
+    throw new TypeError('Thermal-inertia colors must match the terrain grid or use null for NoData.');
+  }
+  const cells = analyzeTerrain(grid, hazards, geologyZones);
   const requestedStart = grid.start;
   const requestedDestination = grid.destination;
   const requestedStartCell = coordinateToGridCell(grid, requestedStart);
@@ -797,10 +916,20 @@ function calculateRoute(grid, hazards = [], metadata = {}) {
         requestedDestinationCell.column
     ]
   );
-  if (coordinateInsideRestrictedHazard(grid, requestedStart, hazards)) {
+  if (coordinateInsideRestrictedHazard(
+    grid,
+    requestedStart,
+    hazards,
+    geologyZones
+  )) {
     throw new Error('The starting coordinate is inside a restricted hazard area.');
   }
-  if (coordinateInsideRestrictedHazard(grid, requestedDestination, hazards)) {
+  if (coordinateInsideRestrictedHazard(
+    grid,
+    requestedDestination,
+    hazards,
+    geologyZones
+  )) {
     throw new Error('The destination is inside a restricted hazard area.');
   }
   const start = findNearestTraversableCell(grid, cells, requestedStart);
@@ -833,7 +962,7 @@ function calculateRoute(grid, hazards = [], metadata = {}) {
   grid.destinationCell = destination.cell;
   grid.start = start.coordinate;
   grid.destination = destination.coordinate;
-  const path = findLowestCostPath(grid, cells);
+  const path = findLowestCostPath(grid, cells, thermalColors);
   const gridCoordinates = path.map(({ row, column }) =>
     gridCellToCoordinate(grid, row, column)
   );
@@ -853,6 +982,7 @@ function calculateRoute(grid, hazards = [], metadata = {}) {
     0
   );
   let accumulatedTerrainCost = 0;
+  let accumulatedThermalTransitionScore = 0;
   let elevationGainMeters = 0;
   let elevationLossMeters = 0;
   const routeCells = path.map(
@@ -870,7 +1000,15 @@ function calculateRoute(grid, hazards = [], metadata = {}) {
     const currentCell = cells[current.row * grid.columns + current.column];
     const terrainPenalty =
       (previousCell.normalizedPenalty + currentCell.normalizedPenalty) / 2;
+    const thermalPenalty = thermalTransitionPenalty(
+      thermalColors,
+      previous.row * grid.columns + previous.column,
+      current.row * grid.columns + current.column
+    );
+    accumulatedThermalTransitionScore += thermalPenalty;
     accumulatedTerrainCost += distance * (1 + terrainPenalty);
+    accumulatedTerrainCost +=
+      distance * CONFIG.costWeights.thermalTransition * thermalPenalty;
     const elevationChange =
       getElevation(grid, current.row, current.column) -
       getElevation(grid, previous.row, previous.column);
@@ -894,6 +1032,19 @@ function calculateRoute(grid, hazards = [], metadata = {}) {
     counts[state] = routeCells.filter((cell) => cell.state === state).length;
     return counts;
   }, {});
+  const geologyZoneCounts = {};
+  routeCells.forEach((cell) => {
+    cell.geologyCategories.forEach((category) => {
+      geologyZoneCounts[category] = (geologyZoneCounts[category] || 0) + 1;
+    });
+  });
+  const geologyZonesConsidered = geologyZones.reduce((counts, zone) => {
+    counts[zone.category] = (counts[zone.category] || 0) + 1;
+    return counts;
+  }, {});
+  const thermalSampleCount = Array.isArray(thermalColors)
+    ? thermalColors.filter(Array.isArray).length
+    : 0;
   const restrictedCellsAvoided = cells.filter(
     (cell) => cell.state === TERRAIN_STATES.RESTRICTED
   ).length;
@@ -940,6 +1091,12 @@ function calculateRoute(grid, hazards = [], metadata = {}) {
       ? Math.max(...slopeValues)
       : null,
     terrainClassCounts: classCounts,
+    geologyZoneCounts,
+    geologyZonesConsidered,
+    thermalInertia: {
+      sampledCells: thermalSampleCount,
+      transitionScore: accumulatedThermalTransitionScore
+    },
     restrictedCellsAvoided: restrictedCellsAvoided,
     unknownCellsBlocked: blockedUnknownCells,
     terrainCoveragePercent: (100 * (totalCells - blockedUnknownCells)) / totalCells,
@@ -947,7 +1104,7 @@ function calculateRoute(grid, hazards = [], metadata = {}) {
       level: 'LOW',
       score: 0.25,
       reason:
-        `MOLA cannot detect foot-scale hazards. Terrain-relief thresholds are scaled by ${Math.max(1, grid.resolutionMeters / CONFIG.grid.defaultResolutionMeters).toFixed(1)}x for this grid spacing; fine terrain between coarse samples is not assessed. This experimental route is not astronaut-certified.`,
+        `MOLA cannot detect foot-scale hazards. The TES layer is sampled as a coarse color-transition cue, not calibrated numeric thermal inertia. USGS global geology is regional-scale and does not confirm surface materials or ice. Terrain-relief thresholds are scaled by ${Math.max(1, grid.resolutionMeters / CONFIG.grid.defaultResolutionMeters).toFixed(1)}x for this grid spacing; fine terrain between coarse samples is not assessed. This experimental route is not astronaut-certified.`,
       sourceResolutionMeters: metadata.sourceResolutionMeters ?? null,
       planningResolutionMeters: grid.resolutionMeters,
       nominalHorizontalUncertaintyMeters:
@@ -965,7 +1122,7 @@ function calculateRoute(grid, hazards = [], metadata = {}) {
       coordinateSystem: metadata.coordinateSystem || 'Mars geographic degrees (WKID 104905)',
       elevationUnits: metadata.elevationUnits || 'meters'
     },
-    heuristic: 'Mars surface-distance lower bound; all movement costs are at least distance.',
+    heuristic: 'Half Mars surface distance; movement cost is bounded below by 0.5 times distance.',
     dataSource: metadata.dataSource || 'NASA Mars Trek MOLA/HRSC DEM'
   };
 }
@@ -973,6 +1130,7 @@ function calculateRoute(grid, hazards = [], metadata = {}) {
 module.exports = {
   TERRAIN_STATES,
   analyzeTerrain,
+  applyGeologyZones,
   calculateRoute,
   coordinateToGridCell,
   createLocalGridGeometry,

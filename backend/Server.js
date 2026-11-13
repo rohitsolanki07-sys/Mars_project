@@ -7,6 +7,7 @@ const { exec } = require('child_process');
 const marsPlacesService = require('./Services/MarsPlacesService');
 const marsRoverService = require('./Services/MarsRoverService');
 const marsTerrainNavigationService = require('./Services/MarsTerrainNavigationService');
+const marsScienceDataService = require('./Services/MarsScienceDataService');
 
 // Create the web server and choose a preferred port. If that port is busy,
 // the server will try the other common development ports listed below.
@@ -230,7 +231,76 @@ app.get('/api/perseverance', async (req, res) => {
   }
 });
 
-// Calculate an experimental low-risk path using NASA MOLA elevations.
+// Return nearby NASA Mars Trek mineral detections and exploration-zone sites.
+app.get('/api/science-sites', async (req, res) => {
+  const [west, south, east, north] = String(req.query.bbox || '')
+    .split(',')
+    .map(Number);
+  const bounds = { west, south, east, north };
+  if (!marsScienceDataService.isValidBounds(bounds)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Science-site bounds must be west,south,east,north coordinates.'
+    });
+  }
+
+  try {
+    const result = await marsScienceDataService.loadVisitableSites(bounds);
+    res.set('Cache-Control', 'public, max-age=300');
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('ERROR loading NASA Mars Trek science sites:', err.message);
+    return res.status(502).json({
+      success: false,
+      message: 'NASA Mars Trek science-site data is temporarily unavailable.'
+    });
+  }
+});
+
+// Identify NASA exploration points and planning zones beneath a map click.
+app.get('/api/exploration-info', async (req, res) => {
+  const latitudeText = String(req.query.latitude ?? '').trim();
+  const longitudeText = String(req.query.longitude ?? '').trim();
+  const radiusText = String(req.query.radiusMeters ?? '10000').trim();
+  const latitude = latitudeText ? Number(latitudeText) : NaN;
+  const longitude = longitudeText ? Number(longitudeText) : NaN;
+  const radiusMeters = radiusText ? Number(radiusText) : NaN;
+  if (
+    !Number.isFinite(latitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    !Number.isFinite(longitude) ||
+    longitude < -180 ||
+    longitude > 180 ||
+    !Number.isFinite(radiusMeters) ||
+    radiusMeters < 0 ||
+    radiusMeters > 25000
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Provide valid exploration coordinates and a radius up to 25,000 metres.'
+    });
+  }
+
+  try {
+    const features =
+      await marsScienceDataService.identifyExplorationFeatures(
+        latitude,
+        longitude,
+        radiusMeters
+      );
+    res.set('Cache-Control', 'public, max-age=60');
+    return res.json({ success: true, features });
+  } catch (err) {
+    console.error('ERROR identifying NASA Mars exploration features:', err.message);
+    return res.status(502).json({
+      success: false,
+      message: 'NASA Mars Trek exploration information is temporarily unavailable.'
+    });
+  }
+});
+
+// Calculate an experimental low-risk science route using MOLA, TES, and USGS geology.
 app.post('/api/navigation/terrain', async (req, res) => {
   try {
     const result =
@@ -248,7 +318,7 @@ app.post('/api/navigation/terrain', async (req, res) => {
           ? 422
           : 502;
     if (statusCode === 502) {
-      console.error('ERROR calculating NASA MOLA terrain route:', err.message);
+      console.error('ERROR calculating NASA terrain-aware route:', err.message);
     }
     return res.status(statusCode).json({
       success: false,

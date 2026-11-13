@@ -4,6 +4,8 @@ const {
   isValidCoordinate
 } = require('./MarsTerrainAnalysis');
 const marsTerrainDataService = require('./MarsTerrainDataService');
+const marsScienceDataService = require('./MarsScienceDataService');
+const marsThermalDataService = require('./MarsThermalDataService');
 
 function validateHazards(hazards) {
   if (hazards === undefined) return [];
@@ -36,14 +38,31 @@ async function calculateTerrainAwareRoute(request) {
     resolutionMeters: request.resolutionMeters,
     interpolation: request.interpolation
   };
-  const terrain = await marsTerrainDataService.loadMarsMolaGrid(
-    request.start,
-    request.destination,
-    options
-  );
+  const loadRouteData = async (gridOptions) => {
+    const terrain = await marsTerrainDataService.loadMarsMolaGrid(
+      request.start,
+      request.destination,
+      gridOptions
+    );
+    const [geologyZones, thermalInertiaColors] = await Promise.all([
+      marsScienceDataService.loadGeologyZones(terrain.grid),
+      marsThermalDataService.loadThermalInertiaColors(terrain.grid)
+    ]);
+    return {
+      terrain,
+      environment: { geologyZones, thermalInertiaColors }
+    };
+  };
+  const routeData = await loadRouteData(options);
+  const { terrain, environment } = routeData;
   let route;
   try {
-    route = calculateRoute(terrain.grid, hazards, terrain.metadata);
+    route = calculateRoute(
+      terrain.grid,
+      hazards,
+      terrain.metadata,
+      environment
+    );
   } catch (error) {
     if (
       !error.message.startsWith('No traversable terrain was found within') &&
@@ -61,15 +80,16 @@ async function calculateTerrainAwareRoute(request) {
     return route;
   }
 
-  const expandedTerrain = await marsTerrainDataService.loadMarsMolaGrid(
-    request.start,
-    request.destination,
-    {
-      ...options,
-      endpointSearchRangeMeters: CONFIG.endpoints.maximumSnapDistanceMeters
-    }
+  const expandedRouteData = await loadRouteData({
+    ...options,
+    endpointSearchRangeMeters: CONFIG.endpoints.maximumSnapDistanceMeters
+  });
+  return calculateRoute(
+    expandedRouteData.terrain.grid,
+    hazards,
+    expandedRouteData.terrain.metadata,
+    expandedRouteData.environment
   );
-  return calculateRoute(expandedTerrain.grid, hazards, expandedTerrain.metadata);
 }
 
 module.exports = { calculateTerrainAwareRoute };

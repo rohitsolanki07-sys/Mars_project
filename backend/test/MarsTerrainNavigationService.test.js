@@ -4,6 +4,8 @@ const test = require('node:test');
 const CONFIG = require('../Services/TerrainNavigationConfig');
 const { createLocalGridGeometry } = require('../Services/MarsTerrainAnalysis');
 const terrainDataService = require('../Services/MarsTerrainDataService');
+const scienceDataService = require('../Services/MarsScienceDataService');
+const thermalDataService = require('../Services/MarsThermalDataService');
 const { calculateTerrainAwareRoute } = require('../Services/MarsTerrainNavigationService');
 
 function makeTerrain(start, destination, paddingMeters, withUnknownBarrier) {
@@ -25,6 +27,8 @@ function makeTerrain(start, destination, paddingMeters, withUnknownBarrier) {
 
 test('retries a disconnected route with a bounded wider MOLA grid', async () => {
   const originalLoadMarsMolaGrid = terrainDataService.loadMarsMolaGrid;
+  const originalLoadGeologyZones = scienceDataService.loadGeologyZones;
+  const originalLoadThermalColors = thermalDataService.loadThermalInertiaColors;
   const start = { latitude: 0, longitude: 0 };
   const destination = { latitude: 0, longitude: 0.02 };
   const requestedPadding = [];
@@ -42,6 +46,9 @@ test('retries a disconnected route with a bounded wider MOLA grid', async () => 
       requestedPadding.length === 1
     );
   };
+  scienceDataService.loadGeologyZones = async () => [];
+  thermalDataService.loadThermalInertiaColors = async (grid) =>
+    new Array(grid.rows * grid.columns).fill([0, 0, 0]);
 
   try {
     const route = await calculateTerrainAwareRoute({
@@ -58,5 +65,7 @@ test('retries a disconnected route with a bounded wider MOLA grid', async () => 
     ]);
   } finally {
     terrainDataService.loadMarsMolaGrid = originalLoadMarsMolaGrid;
+    scienceDataService.loadGeologyZones = originalLoadGeologyZones;
+    thermalDataService.loadThermalInertiaColors = originalLoadThermalColors;
   }
 });

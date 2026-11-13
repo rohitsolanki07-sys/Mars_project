@@ -37,7 +37,12 @@ module.exports = Object.freeze({
     slope: 0.4,
     roughness: 0.3,
     elevationChange: 0.1,
-    hazard: 0.2
+    hazard: 0.2,
+    thermalTransition: 0.15
+  }),
+  geologyPreferences: Object.freeze({
+    minimumCostAdjustment: -0.15,
+    maximumCostAdjustment: 0.15
   }),
   unknownElevationPolicy: 'block',
   nasaMola: Object.freeze({

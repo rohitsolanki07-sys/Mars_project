@@ -207,6 +207,76 @@ test('A* routes around polygon hazards', () => {
   assert.ok(result.routeCells.every((cell) => cell.state !== TERRAIN_STATES.RESTRICTED));
 });
 
+test('USGS hazard-class geology polygons are blocked and detoured around', () => {
+  const grid = flatGrid(11, 11, 500);
+  grid.startCell = { row: 5, column: 1 };
+  grid.destinationCell = { row: 5, column: 9 };
+  grid.start = gridCellToCoordinate(grid, 5, 1);
+  grid.destination = gridCellToCoordinate(grid, 5, 9);
+  const corners = [
+    gridCellToCoordinate(grid, 2, 4),
+    gridCellToCoordinate(grid, 2, 6),
+    gridCellToCoordinate(grid, 8, 6),
+    gridCellToCoordinate(grid, 8, 4)
+  ];
+
+  const result = calculateRoute(grid, [], {}, {
+    geologyZones: [{
+      category: 'hazard',
+      preference: 0,
+      polygon: corners
+    }]
+  });
+
+  assert.ok(result.totalDistanceMeters > 8 * grid.resolutionMeters);
+  assert.ok(result.routeCells.every((cell) => cell.state !== TERRAIN_STATES.RESTRICTED));
+  assert.equal(result.geologyZonesConsidered.hazard, 1);
+});
+
+test('science geology zones are reported and affect the route cost', () => {
+  const grid = flatGrid(9, 9, 500);
+  grid.startCell = { row: 4, column: 0 };
+  grid.destinationCell = { row: 4, column: 8 };
+  grid.start = gridCellToCoordinate(grid, 4, 0);
+  grid.destination = gridCellToCoordinate(grid, 4, 8);
+  const corners = [
+    gridCellToCoordinate(grid, 3, 1),
+    gridCellToCoordinate(grid, 3, 7),
+    gridCellToCoordinate(grid, 5, 7),
+    gridCellToCoordinate(grid, 5, 1)
+  ];
+
+  const result = calculateRoute(grid, [], {}, {
+    geologyZones: [{
+      category: 'water_ice_target',
+      preference: -0.15,
+      polygon: corners
+    }]
+  });
+
+  assert.ok(result.geologyZoneCounts.water_ice_target > 0);
+  assert.ok(result.routeCells.some((cell) => cell.geologyPenalty === -0.15));
+});
+
+test('TES thermal-color transitions contribute to route effort reporting', () => {
+  const grid = flatGrid(9, 9, 500);
+  grid.startCell = { row: 4, column: 0 };
+  grid.destinationCell = { row: 4, column: 8 };
+  grid.start = gridCellToCoordinate(grid, 4, 0);
+  grid.destination = gridCellToCoordinate(grid, 4, 8);
+  const thermalInertiaColors = new Array(grid.rows * grid.columns)
+    .fill(null)
+    .map((_, index) => {
+      const column = index % grid.columns;
+      return column < 4 ? [20, 40, 60] : [220, 180, 140];
+    });
+
+  const result = calculateRoute(grid, [], {}, { thermalInertiaColors });
+
+  assert.equal(result.thermalInertia.sampledCells, grid.rows * grid.columns);
+  assert.ok(result.thermalInertia.transitionScore > 0);
+});
+
 test('missing elevation is UNKNOWN and never used as a safe path', () => {
   const grid = flatGrid();
   grid.startCell = { row: 4, column: 0 };

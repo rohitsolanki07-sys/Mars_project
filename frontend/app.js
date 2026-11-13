@@ -380,7 +380,8 @@ function getOverlayLabelNode(entity) {
         lat: Cesium.Math.toDegrees(cartographic.latitude),
         lng: Cesium.Math.toDegrees(cartographic.longitude)
       },
-      originalEvent: event
+      originalEvent: event,
+      pickedEntity: Boolean(entity.mapPopup)
     });
   });
   marsOverlayLabels.append(element);
@@ -531,6 +532,7 @@ viewer.scene.postRender.addEventListener(renderMarsEntityOverlay);
 
 const screenHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 screenHandler.setInputAction((movement) => {
+  explorationIdentifyRequestId += 1;
   const picked = viewer.scene.pick(movement.position);
   const entity = Cesium.defined(picked)
     ? picked.id ?? picked.primitive?.id
@@ -539,7 +541,13 @@ screenHandler.setInputAction((movement) => {
   else if (mapPopup) mapPopup.hidden = true;
 
   const latlng = getMarsPosition(movement.position);
-  if (latlng) map.emit('click', { latlng, originalEvent: movement });
+  if (latlng) {
+    map.emit('click', {
+      latlng,
+      originalEvent: movement,
+      pickedEntity: Boolean(entity?.mapPopup)
+    });
+  }
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 screenHandler.setInputAction((movement) => {
   const latlng = getMarsPosition(movement.endPosition);
@@ -593,11 +601,12 @@ function createMarsTrekImagery(
     alpha = 1,
     rectangle = Cesium.Rectangle.fromDegrees(-180, -90, 180, 90),
     minimumLevel = 0,
-    maximumLevel = 14
+    maximumLevel = 14,
+    extraParameters = ''
   } = {}
 ) {
   const provider = new Cesium.UrlTemplateImageryProvider({
-    url: `${serviceUrl}?bbox={westDegrees},{southDegrees},{eastDegrees},{northDegrees}&bboxSR=104905&imageSR=104905&size=256,256&format=png32&transparent=true&interpolation=RSP_Bilinear&f=image`,
+    url: `${serviceUrl}?${extraParameters ? `${extraParameters}&` : ''}bbox={westDegrees},{southDegrees},{eastDegrees},{northDegrees}&bboxSR=104905&imageSR=104905&size=256,256&format=png32&transparent=true&interpolation=RSP_Bilinear&f=image`,
     tilingScheme: new Cesium.GeographicTilingScheme({
       ellipsoid: MARS_ELLIPSOID,
       numberOfLevelZeroTilesX: 2,
@@ -648,6 +657,34 @@ const mgsTesThermalInertia = viewer.imageryLayers.addImageryProvider(
   })
 );
 mgsTesThermalInertia.show = false;
+const usgsGlobalGeology = createMarsTrekImagery(
+  'https://trek.nasa.gov/mars/trekarcgis/rest/services/SIM3292_Global_Geology/MapServer/export',
+  'USGS SIM 3292 global geology',
+  { alpha: 0.62, maximumLevel: 11 }
+);
+usgsGlobalGeology.show = false;
+const hydrousMineralDetections = createMarsTrekImagery(
+  'https://trek.nasa.gov/mars/trekarcgis/rest/services/Hydrous_Mineral_Detections_OMEGA_CRISM_clon0/MapServer/export',
+  'OMEGA/CRISM hydrous mineral detections',
+  { alpha: 0.82, maximumLevel: 14 }
+);
+hydrousMineralDetections.show = false;
+const explorationZonesLayer = createMarsTrekImagery(
+  'https://trek.nasa.gov/mars/trekarcgis/rest/services/EZ/MapServer/export',
+  'USGS exploration zones',
+  { alpha: 0.9, maximumLevel: 14 }
+);
+explorationZonesLayer.show = false;
+const explorationPlanningZonesLayer = createMarsTrekImagery(
+  'https://trek.nasa.gov/mars/trekarcgis/rest/services/EZMars/MapServer/export',
+  'NASA Mars Trek exploration planning zones',
+  {
+    alpha: 0.7,
+    maximumLevel: 14,
+    extraParameters: 'layers=show:0,1,2,3,4'
+  }
+);
+explorationPlanningZonesLayer.show = false;
 const curiosityHiRISEImagery = createMarsTrekImagery(
   'https://trek.nasa.gov/mars/trekarcgis/rest/services/curiosity_hirise_mosaic/ImageServer/exportImage',
   'Curiosity HiRISE surface mosaic',
@@ -692,6 +729,8 @@ const curiosityWaypointLayerGroup = new GlobeLayerGroup();
 const perseveranceTraverseLayerGroup = new GlobeLayerGroup();
 const perseveranceWaypointLayerGroup = new GlobeLayerGroup();
 const perseveranceLandingLayerGroup = new GlobeLayerGroup();
+const hydrousSitesLayerGroup = new GlobeLayerGroup();
+const explorationSitesLayerGroup = new GlobeLayerGroup();
 
 const themeToggleBtn = document.getElementById('themeToggleBtn');
 const APP_THEME_STORAGE_KEY = 'ares-nav-theme';
@@ -758,6 +797,10 @@ let placeNamesEnabled = false;
 let molaLayerEnabled = false;
 let thermalInertiaLayerEnabled = false;
 let hazardsLayerEnabled = false;
+let geologyLayerEnabled = false;
+let mineralLayerEnabled = false;
+let explorationLayerEnabled = false;
+let explorationIdentifyRequestId = 0;
 let curiosityImageryEnabled = false;
 let curiosityRoverEnabled = false;
 let insightImageryEnabled = false;
@@ -774,6 +817,7 @@ let perseveranceDataLoaded = false;
 let perseveranceDataRequest = null;
 let perseveranceWaypointCount = 0;
 let perseverancePathCount = 0;
+let loadedScienceSites = [];
 const LOCAL_BACKEND_PORTS = ['3000', '5500', '3001', '3002', '5050', '8080'];
 
 // The terrain legend follows the same toggle as the NASA MOLA overlay.
@@ -902,6 +946,7 @@ let terrainRouteRequestId = 0;
 let endpointSiteKey = null;
 let currentSiteDetails = null;
 let loadedNASAPlaces = [];
+let missionRouteLoadRequestId = 0;
 let selectedNASAEndpointLocations = { departure: null, arrival: null };
 let customEndpointLocations = { departure: null, arrival: null };
 let mapPickMode = null;
@@ -959,6 +1004,14 @@ function getRouteLocations(siteData) {
     elevationM: place.elevationM,
     place
   }));
+  const scienceLocations = loadedScienceSites.map((site) => ({
+    id: `science:${site.id}`,
+    name: site.name,
+    coords: [site.latitude, site.longitude],
+    sampleSite: site.kind === 'sample',
+    explorationSite: site.kind === 'exploration',
+    source: site.source
+  }));
   const customLocations = Object.values(customEndpointLocations)
     .filter(Boolean)
     .map((location) => ({
@@ -968,7 +1021,12 @@ function getRouteLocations(siteData) {
         : location.name
     }));
 
-  return [...routeLocations, ...nasaLocations, ...customLocations];
+  return [
+    ...routeLocations,
+    ...nasaLocations,
+    ...scienceLocations,
+    ...customLocations
+  ];
 }
 
 function populateRouteSelectors(siteData) {
@@ -997,6 +1055,14 @@ function populateRouteSelectors(siteData) {
       {
         label: 'NASA Mars Trek places in the current map area',
         locations: locations.filter((location) => location.place)
+      },
+      {
+        label: 'OMEGA/CRISM orbital detections (candidate samples)',
+        locations: locations.filter((location) => location.sampleSite)
+      },
+      {
+        label: 'USGS exploration-zone sites',
+        locations: locations.filter((location) => location.explorationSite)
       },
       {
         label: 'Custom map points',
@@ -1366,6 +1432,51 @@ function createMapPopup(title, rows) {
   heading.textContent = title;
   popup.append(heading);
   rows.forEach(([label, value]) => addPlacePopupRow(popup, label, String(value)));
+  return popup;
+}
+
+function createExplorationInfoPopup(features) {
+  const popup = document.createElement('div');
+  popup.className = 'mars-place-popup';
+  features.forEach((feature) => {
+    const heading = document.createElement('h3');
+    heading.textContent = feature.name;
+    popup.append(heading);
+    feature.details.forEach(([label, value]) =>
+      addPlacePopupRow(popup, label, String(value))
+    );
+    feature.links.forEach(([label, value]) => {
+      let url;
+      try {
+        url = new URL(value);
+      } catch {
+        return;
+      }
+      const secureHosts = [
+        'trek.nasa.gov',
+        'nasa.gov',
+        'www.nasa.gov',
+        'hou.usra.edu',
+        'www.hou.usra.edu',
+        'youtube.com',
+        'www.youtube.com'
+      ];
+      if (
+        !(
+          (url.protocol === 'https:' && secureHosts.includes(url.hostname)) ||
+          (url.protocol === 'http:' && url.hostname === 'www.hou.usra.edu')
+        )
+      ) {
+        return;
+      }
+      const link = document.createElement('a');
+      link.href = url.href;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = label;
+      popup.append(link);
+    });
+  });
   return popup;
 }
 
@@ -2234,13 +2345,67 @@ function renderTurnByTurnSteps(waypoints, siteDetails, routeEndpoints) {
 
 // Route Loader & Telemetry
 async function loadMissionRoute() {
+  const loadRequestId = ++missionRouteLoadRequestId;
   stopNavigationSimulation();
   clearTerrainNavigationRoute();
   const site = document.getElementById('siteSelect').value;
   try {
     const loadedPlan = await getMissionPlan(site);
+    if (loadRequestId !== missionRouteLoadRequestId) return;
     const details = loadedPlan.site_details || FALLBACK_MARS_DATA[site.toLowerCase()];
     currentSiteDetails = details;
+    const scienceSitesStatus = document.getElementById('scienceSitesStatus');
+    loadedScienceSites = [];
+    hydrousSitesLayerGroup.clearLayers();
+    explorationSitesLayerGroup.clearLayers();
+    if (scienceSitesStatus) {
+      scienceSitesStatus.textContent = 'Loading nearby OMEGA/CRISM targets and exploration zones…';
+    }
+    try {
+      loadedScienceSites = await fetchNearbyScienceSites(details);
+      if (loadRequestId !== missionRouteLoadRequestId) return;
+      loadedScienceSites.forEach((scienceSite) => {
+        const entity = viewer.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(
+            scienceSite.longitude,
+            scienceSite.latitude,
+            0,
+            MARS_ELLIPSOID
+          ),
+          point: {
+            pixelSize: scienceSite.kind === 'sample' ? 9 : 7,
+            color: Cesium.Color.fromCssColorString(
+              scienceSite.kind === 'sample' ? '#d946ef' : '#fbbf24'
+            ),
+            outlineColor: Cesium.Color.fromCssColorString('#111827'),
+            outlineWidth: 2,
+            disableDepthTestDistance: 0
+          }
+        });
+        entity.mapPopup = createMapPopup(scienceSite.name, [
+          ['Coordinates', `${scienceSite.latitude.toFixed(4)}°, ${scienceSite.longitude.toFixed(4)}°`],
+          ['Site type', scienceSite.kind === 'sample' ? 'Hydrous mineral sample target' : 'Exploration-zone candidate'],
+          ['Status', scienceSite.status || (scienceSite.kind === 'sample' ? 'Detection candidate' : 'Not specified')],
+          ['Source', scienceSite.source]
+        ]);
+        (scienceSite.kind === 'sample'
+          ? hydrousSitesLayerGroup
+          : explorationSitesLayerGroup
+        ).addLayer(entity);
+      });
+      if (scienceSitesStatus) {
+        const sampleCount = loadedScienceSites.filter((location) => location.kind === 'sample').length;
+        const explorationCount = loadedScienceSites.length - sampleCount;
+        scienceSitesStatus.textContent =
+          `${sampleCount} OMEGA/CRISM detection candidates and ${explorationCount} exploration-zone sites available as route endpoints; surface access is unverified.`;
+      }
+    } catch (error) {
+      if (loadRequestId !== missionRouteLoadRequestId) return;
+      if (scienceSitesStatus) {
+        scienceSitesStatus.textContent = `Sample sites unavailable: ${error.message}`;
+      }
+      console.error('Unable to load nearby Mars science sites:', error);
+    }
     const routeLocations = populateRouteSelectors(details);
     const departure = routeLocations.find((location) => location.id === document.getElementById('departureSelect').value);
     const arrival = routeLocations.find((location) => location.id === document.getElementById('arrivalSelect').value);
@@ -2458,6 +2623,7 @@ async function loadMissionRoute() {
     applyMapLayersForView(currentAppView);
 
   } catch (err) {
+    if (loadRequestId !== missionRouteLoadRequestId) return;
     console.error(err);
   }
 }
@@ -2611,7 +2777,17 @@ document.getElementById('departureCoordinateForm').addEventListener('submit', (e
 document.getElementById('arrivalCoordinateForm').addEventListener('submit', (event) => {
   handleCoordinateFormSubmit(event, 'arrival');
 });
-map.on('click', (event) => selectCustomMapPoint(event.latlng));
+map.on('click', (event) => {
+  const selectingMapPoint = Boolean(mapPickMode);
+  selectCustomMapPoint(event.latlng);
+  if (
+    !selectingMapPoint &&
+    explorationLayerEnabled &&
+    !event.pickedEntity
+  ) {
+    identifyExplorationFeatureAt(event);
+  }
+});
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') cancelMapPointSelection();
 });
@@ -2653,6 +2829,165 @@ function getTerrainRouteHazards() {
       bufferMeters: 350,
       restricted: true
     }));
+}
+
+async function fetchNearbyScienceSites(siteData) {
+  const center = siteData?.center || siteData?.base_habitat?.coords;
+  if (!Array.isArray(center) || center.length !== 2) {
+    throw new Error('The selected mission site has no search center.');
+  }
+  const latitudeRadius = 3;
+  const longitudeRadius = Math.min(
+    20,
+    latitudeRadius / Math.max(Math.cos(center[0] * Math.PI / 180), 0.15)
+  );
+  const west = Math.max(-180, center[1] - longitudeRadius);
+  const east = Math.min(180, center[1] + longitudeRadius);
+  const south = Math.max(-90, center[0] - latitudeRadius);
+  const north = Math.min(90, center[0] + latitudeRadius);
+  const apiUrls = [];
+
+  if (window.location.protocol !== 'file:') {
+    apiUrls.push(new URL('/api/science-sites', window.location.origin));
+  }
+  if (
+    window.location.protocol === 'file:' ||
+    ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+  ) {
+    const host =
+      window.location.protocol === 'file:'
+        ? 'localhost'
+        : window.location.hostname;
+    const ports = new Set([window.location.port, ...LOCAL_BACKEND_PORTS]);
+    for (const port of ports) {
+      if (port) apiUrls.push(new URL('/api/science-sites', `http://${host}:${port}`));
+    }
+  }
+
+  const failures = [];
+  for (const apiUrl of new Map(apiUrls.map((url) => [url.origin, url])).values()) {
+    apiUrl.searchParams.set('bbox', [west, south, east, north].join(','));
+    try {
+      const response = await fetch(apiUrl, {
+        signal: AbortSignal.timeout(30000)
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        failures.push(result.message || `Science-site API returned HTTP ${response.status}.`);
+        continue;
+      }
+      const sampleSites = (result.sampleSites || []).map((site) => ({
+        ...site,
+        kind: 'sample'
+      }));
+      const explorationSites = (result.explorationSites || []).map((site) => ({
+        ...site,
+        kind: 'exploration'
+      }));
+      return [...sampleSites, ...explorationSites];
+    } catch (error) {
+      if (error.name === 'AbortError' || error.name === 'TimeoutError') throw error;
+      failures.push(`${apiUrl.origin}: ${error.message}`);
+    }
+  }
+  throw new Error(
+    failures.length
+      ? `NASA sample-site data could not be loaded (${failures.join('; ')}).`
+      : 'NASA sample-site data is available only when the Mars Navigator backend is running.'
+  );
+}
+
+async function fetchExplorationFeatureInfo(location) {
+  const apiUrls = [];
+  if (window.location.protocol !== 'file:') {
+    apiUrls.push(new URL('/api/exploration-info', window.location.origin));
+  }
+  if (
+    window.location.protocol === 'file:' ||
+    ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+  ) {
+    const host =
+      window.location.protocol === 'file:'
+        ? 'localhost'
+        : window.location.hostname;
+    const ports = new Set([window.location.port, ...LOCAL_BACKEND_PORTS]);
+    for (const port of ports) {
+      if (port) apiUrls.push(new URL('/api/exploration-info', `http://${host}:${port}`));
+    }
+  }
+
+  const failures = [];
+  for (const apiUrl of new Map(apiUrls.map((url) => [url.origin, url])).values()) {
+    apiUrl.searchParams.set('latitude', String(location.lat));
+    apiUrl.searchParams.set('longitude', String(location.lng));
+    apiUrl.searchParams.set('radiusMeters', '10000');
+    try {
+      const response = await fetch(apiUrl, {
+        signal: AbortSignal.timeout(15000)
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success || !Array.isArray(result.features)) {
+        failures.push(
+          result.message || `Exploration info API returned HTTP ${response.status}.`
+        );
+        continue;
+      }
+      return result.features;
+    } catch (error) {
+      if (error.name === 'AbortError' || error.name === 'TimeoutError') throw error;
+      failures.push(`${apiUrl.origin}: ${error.message}`);
+    }
+  }
+  throw new Error(
+    failures.length
+      ? `NASA Mars Trek exploration info could not be loaded (${failures.join('; ')}).`
+      : 'NASA exploration info is available only when the Mars Navigator backend is running.'
+  );
+}
+
+function getMapClickScreenPosition(event) {
+  const position = event.originalEvent?.position;
+  if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) {
+    return { x: position.x, y: position.y };
+  }
+  const originalEvent = event.originalEvent;
+  if (
+    originalEvent &&
+    Number.isFinite(originalEvent.clientX) &&
+    Number.isFinite(originalEvent.clientY)
+  ) {
+    const bounds = viewer.container.getBoundingClientRect();
+    return {
+      x: originalEvent.clientX - bounds.left,
+      y: originalEvent.clientY - bounds.top
+    };
+  }
+  return { x: 16, y: 16 };
+}
+
+async function identifyExplorationFeatureAt(event) {
+  const requestId = ++explorationIdentifyRequestId;
+  const screenPosition = getMapClickScreenPosition(event);
+  try {
+    const features = await fetchExplorationFeatureInfo(event.latlng);
+    if (
+      requestId !== explorationIdentifyRequestId ||
+      !explorationLayerEnabled ||
+      features.length === 0
+    ) {
+      return;
+    }
+    showMapPopup(createExplorationInfoPopup(features), screenPosition);
+  } catch (error) {
+    if (requestId !== explorationIdentifyRequestId || !explorationLayerEnabled) return;
+    console.warn('NASA Mars Trek exploration information is unavailable:', error.message);
+    showMapPopup(
+      createMapPopup('Exploration information unavailable', [
+        ['Details', 'NASA Mars Trek could not return feature information. Try again shortly.']
+      ]),
+      screenPosition
+    );
+  }
 }
 
 async function fetchTerrainRoute(requestBody) {
@@ -2771,7 +3106,7 @@ function renderTerrainNavigationResult(route) {
       clampToGround: true
     }
   });
-  routeEntity.mapPopup = createMapPopup('Experimental MOLA terrain route', [
+  routeEntity.mapPopup = createMapPopup('Experimental Mars science route', [
     ['Distance', `${route.totalDistanceKilometers.toFixed(2)} km`],
     ['Average slope', `${route.averageSlopeDegrees.toFixed(1)}°`],
     ['Maximum slope', `${route.maximumSlopeDegrees.toFixed(1)}°`],
@@ -2816,7 +3151,7 @@ function renderTerrainNavigationResult(route) {
         'Coordinates',
         `${coordinate.latitude.toFixed(5)}°, ${coordinate.longitude.toFixed(5)}°`
       ],
-      ['Route', 'Experimental NASA MOLA terrain-weighted route']
+      ['Route inputs', 'NASA MOLA relief, TES thermal-inertia transitions, USGS geology']
     ]);
     terrainRouteLayerGroup.addLayer(marker);
   });
@@ -2831,12 +3166,17 @@ function renderTerrainNavigationResult(route) {
   terrainNavigationResult = route;
 
   const classCounts = route.terrainClassCounts;
+  const geologyCounts = route.geologyZoneCounts || {};
+  const geologyZones = route.geologyZonesConsidered || {};
   const terrainStats = [
     `Distance: ${route.totalDistanceKilometers.toFixed(2)} km`,
     `Average / maximum slope: ${route.averageSlopeDegrees.toFixed(1)}° / ${route.maximumSlopeDegrees.toFixed(1)}°`,
     `Route cells — preferred: ${classCounts.SAFE_CANDIDATE || 0}, caution: ${classCounts.CAUTION || 0}, high risk: ${classCounts.HIGH_RISK || 0}`,
     `Sampled area coverage: ${route.terrainCoveragePercent.toFixed(1)}%`,
     `Restricted cells excluded: ${route.restrictedCellsAvoided}; unknown cells blocked: ${route.unknownCellsBlocked}`,
+    `USGS zone features considered — hazards: ${geologyZones.hazard || 0}, potential water/ice: ${geologyZones.water_ice_target || 0}, lowland/basin: ${geologyZones.preferred_transit || 0}, Amazonian volcanic: ${geologyZones.volcanic_habitat_candidate || 0}`,
+    `Route cells in preferred geology — potential water/ice: ${geologyCounts.water_ice_target || 0}, lowland/basin: ${geologyCounts.preferred_transit || 0}, volcanic habitat candidates: ${geologyCounts.volcanic_habitat_candidate || 0}`,
+    `TES thermal layer: ${route.thermalInertia?.sampledCells || 0} grid samples; relative color-transition cost ${route.thermalInertia?.transitionScore?.toFixed(2) ?? '0.00'}`,
     `Effort index: ${route.estimatedEffort.index.toFixed(2)} (relative, not a certified energy estimate)`
   ];
   const adjustedEndpoints = Object.entries(route.endpointAdjustments || {})
@@ -2864,7 +3204,7 @@ function renderTerrainNavigationResult(route) {
     route.totalDistanceKilometers / Math.max(activeTravelSpeedKmH, 0.1)
   ).toFixed(2);
   document.getElementById('routeMetaDesc').textContent =
-    'Experimental terrain-weighted route · NASA MOLA';
+    'Experimental geology- and terrain-weighted route · NASA MOLA, TES, USGS';
   renderTurnByTurnSteps(routePoints, currentSiteDetails, currentRouteEndpoints);
   applyMapLayersForView(currentAppView);
   map.fitBounds(routeEntity.getBounds(), { duration: 0.8 });
@@ -2910,6 +3250,16 @@ function getTerrainRouteReviewItems(route) {
       `An endpoint was moved to sampled traversable terrain by ${endpointAdjustments.map((distance) => `${distance.toFixed(0)} m`).join(' and ')}; confirm the adjusted coordinates.`
     );
   }
+  const geologyZones = route.geologyZonesConsidered || {};
+  const geologyZoneCount = Object.values(geologyZones).reduce(
+    (total, count) => total + count,
+    0
+  );
+  if (geologyZoneCount > 0) {
+    reviewFlags.push(
+      `${geologyZoneCount} regional USGS geology zones informed this route; unit labels are science context, not field-verified ice, lava tubes, or safe surfaces.`
+    );
+  }
   if (reviewFlags.length === 0) {
     reviewFlags.push(
       'No modeled review flags were detected in available samples. This does not establish that the route is safe.'
@@ -2940,7 +3290,7 @@ function downloadTerrainRouteBriefing(route) {
   const routeCells = Array.isArray(route.routeCells) ? route.routeCells : [];
   const waypoints = routeCells.length
     ? routeCells.map((cell, index) =>
-      `${String(index + 1).padStart(2, '0')}. ${cell.latitude.toFixed(5)}°, ${cell.longitude.toFixed(5)}° | elevation ${Number.isFinite(cell.elevationMeters) ? `${cell.elevationMeters.toFixed(0)} m` : 'unknown'} | slope ${Number.isFinite(cell.slopeDegrees) ? `${cell.slopeDegrees.toFixed(1)}°` : 'unknown'} | ${cell.state || 'terrain class unavailable'}`
+      `${String(index + 1).padStart(2, '0')}. ${cell.latitude.toFixed(5)}°, ${cell.longitude.toFixed(5)}° | elevation ${Number.isFinite(cell.elevationMeters) ? `${cell.elevationMeters.toFixed(0)} m` : 'unknown'} | slope ${Number.isFinite(cell.slopeDegrees) ? `${cell.slopeDegrees.toFixed(1)}°` : 'unknown'} | ${cell.state || 'terrain class unavailable'} | geology ${cell.geologyCategories?.join(', ') || 'unclassified'}`
     )
     : route.routeCoordinates.map((point, index) =>
       `${String(index + 1).padStart(2, '0')}. ${point.latitude.toFixed(5)}°, ${point.longitude.toFixed(5)}°`
@@ -2958,6 +3308,7 @@ function downloadTerrainRouteBriefing(route) {
     `Terrain grid spacing: ${route.grid.resolutionMeters.toFixed(0)} m`,
     `Planning-grid elevation coverage: ${route.terrainCoveragePercent.toFixed(1)}%`,
     `Terrain class cells — caution: ${route.terrainClassCounts.CAUTION || 0}, high risk: ${route.terrainClassCounts.HIGH_RISK || 0}`,
+    `TES thermal samples: ${route.thermalInertia?.sampledCells || 0}; relative color-transition cost: ${route.thermalInertia?.transitionScore?.toFixed(2) ?? '0.00'} (not a calibrated thermal-inertia value)`,
     `Known restricted cells avoided: ${route.restrictedCellsAvoided}`,
     '',
     'ROUTE REVIEW ITEMS',
@@ -2969,7 +3320,8 @@ function downloadTerrainRouteBriefing(route) {
     'LIMITATIONS',
     route.confidence.reason,
     'This experimental route is not astronaut-certified or operational guidance. MOLA data cannot resolve foot-scale rocks, cracks, dust, or other small/current hazards. Confirm conditions and route decisions with validated mission systems and human review.',
-    `Terrain data source: ${route.dataSource || 'NASA Mars Trek MOLA/HRSC DEM'}`
+    `Terrain data source: ${route.dataSource || 'NASA Mars Trek MOLA/HRSC DEM'}`,
+    'Additional route sources: NASA Mars Trek MGS TES global thermal-inertia tiles; USGS SIM 3292 global geology.'
   ].join('\n');
   const safeSiteName = siteName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'mars-site';
   const downloadUrl = URL.createObjectURL(
@@ -3005,7 +3357,7 @@ calculateTerrainRouteBtn?.addEventListener('click', async () => {
   applyMapLayersForView(currentAppView);
   const requestId = ++terrainRouteRequestId;
   calculateTerrainRouteBtn.disabled = true;
-  if (status) status.textContent = 'Sampling NASA MOLA elevations and searching for a lower-risk route…';
+  if (status) status.textContent = 'Sampling NASA MOLA and TES layers and loading USGS geology…';
   try {
     const route = await fetchTerrainRoute({
       start: {
@@ -3070,6 +3422,9 @@ function applyMapLayersForView(view = currentAppView) {
     view === 'hazards' || hazardsLayerEnabled;
   const showMola = molaLayerEnabled;
   const showThermalInertia = thermalInertiaLayerEnabled;
+  const showGeology = geologyLayerEnabled;
+  const showMinerals = mineralLayerEnabled;
+  const showExplorationZones = explorationLayerEnabled;
   const showPlaceNames = placeNamesEnabled;
   const showCuriosityImagery = curiosityImageryEnabled;
   const showCuriosityRover = curiosityRoverEnabled;
@@ -3082,6 +3437,12 @@ function applyMapLayersForView(view = currentAppView) {
   setMapLayerVisible(hazardLayerGroup, showHazards);
   setMapLayerVisible(molaElevationOverlay, showMola);
   setMapLayerVisible(mgsTesThermalInertia, showThermalInertia);
+  setMapLayerVisible(usgsGlobalGeology, showGeology);
+  setMapLayerVisible(hydrousMineralDetections, showMinerals);
+  setMapLayerVisible(explorationZonesLayer, showExplorationZones);
+  setMapLayerVisible(explorationPlanningZonesLayer, showExplorationZones);
+  setMapLayerVisible(hydrousSitesLayerGroup, showMinerals);
+  setMapLayerVisible(explorationSitesLayerGroup, showExplorationZones);
   setMapLayerVisible(placeNamesLayerGroup, showPlaceNames);
   setMapLayerVisible(curiosityHiRISEImagery, showCuriosityImagery);
   setMapLayerVisible(curiosityTraverseLayerGroup, showCuriosityRover);
@@ -3123,6 +3484,28 @@ const toggleThermalInertiaBtn = document.getElementById(
 toggleThermalInertiaBtn?.addEventListener('click', () => {
   thermalInertiaLayerEnabled = !thermalInertiaLayerEnabled;
   updateLayerToggle(toggleThermalInertiaBtn, thermalInertiaLayerEnabled);
+  applyMapLayersForView(currentAppView);
+});
+
+const toggleGlobalGeologyBtn = document.getElementById('toggleGlobalGeologyBtn');
+toggleGlobalGeologyBtn?.addEventListener('click', () => {
+  geologyLayerEnabled = !geologyLayerEnabled;
+  updateLayerToggle(toggleGlobalGeologyBtn, geologyLayerEnabled);
+  applyMapLayersForView(currentAppView);
+});
+
+const toggleHydrousMineralsBtn = document.getElementById('toggleHydrousMineralsBtn');
+toggleHydrousMineralsBtn?.addEventListener('click', () => {
+  mineralLayerEnabled = !mineralLayerEnabled;
+  updateLayerToggle(toggleHydrousMineralsBtn, mineralLayerEnabled);
+  applyMapLayersForView(currentAppView);
+});
+
+const toggleExplorationZonesBtn = document.getElementById('toggleExplorationZonesBtn');
+toggleExplorationZonesBtn?.addEventListener('click', () => {
+  explorationLayerEnabled = !explorationLayerEnabled;
+  explorationIdentifyRequestId += 1;
+  updateLayerToggle(toggleExplorationZonesBtn, explorationLayerEnabled);
   applyMapLayersForView(currentAppView);
 });
 
@@ -3373,6 +3756,9 @@ map.on('mousemove', (e) => {
 map.on('moveend zoomend', scheduleNASAPlaceNameRefresh);
 updateLayerToggle(toggleMolaBtn, molaLayerEnabled);
 updateLayerToggle(toggleThermalInertiaBtn, thermalInertiaLayerEnabled);
+updateLayerToggle(toggleGlobalGeologyBtn, geologyLayerEnabled);
+updateLayerToggle(toggleHydrousMineralsBtn, mineralLayerEnabled);
+updateLayerToggle(toggleExplorationZonesBtn, explorationLayerEnabled);
 updateLayerToggle(toggleHazardsBtn, hazardsLayerEnabled);
 updateLayerToggle(togglePlaceNamesBtn, placeNamesEnabled);
 updateLayerToggle(toggleCuriosityImageryBtn, curiosityImageryEnabled);
