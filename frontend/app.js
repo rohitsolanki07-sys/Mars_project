@@ -627,6 +627,26 @@ const molaElevationOverlay = createMarsTrekImagery(
   'MOLA/HRSC color-shaded relief',
   { alpha: 0.65 }
 );
+const mgsTesThermalInertia = viewer.imageryLayers.addImageryProvider(
+  new Cesium.UrlTemplateImageryProvider({
+    url: 'https://trek.nasa.gov/tiles/Mars/EQ/TES_Thermal_Inertia/1.0.0/default/default028mm/{z}/{y}/{x}.png',
+    tilingScheme: new Cesium.GeographicTilingScheme({
+      ellipsoid: MARS_ELLIPSOID,
+      numberOfLevelZeroTilesX: 2,
+      numberOfLevelZeroTilesY: 1
+    }),
+    rectangle: Cesium.Rectangle.fromDegrees(-180, -90, 180, 90),
+    tileWidth: 256,
+    tileHeight: 256,
+    minimumLevel: 0,
+    maximumLevel: 1,
+    credit: new Cesium.Credit(
+      'NASA/JPL Mars Trek — MGS TES, Global Thermal Inertia',
+      false
+    )
+  })
+);
+mgsTesThermalInertia.show = false;
 const curiosityHiRISEImagery = createMarsTrekImagery(
   'https://trek.nasa.gov/mars/trekarcgis/rest/services/curiosity_hirise_mosaic/ImageServer/exportImage',
   'Curiosity HiRISE surface mosaic',
@@ -735,6 +755,7 @@ const NASA_PLACE_LAYERS = [
 ];
 let placeNamesEnabled = false;
 let molaLayerEnabled = false;
+let thermalInertiaLayerEnabled = false;
 let hazardsLayerEnabled = false;
 let curiosityImageryEnabled = false;
 let curiosityRoverEnabled = false;
@@ -3041,6 +3062,7 @@ function applyMapLayersForView(view = currentAppView) {
   const showHazards =
     view === 'hazards' || hazardsLayerEnabled;
   const showMola = molaLayerEnabled;
+  const showThermalInertia = thermalInertiaLayerEnabled;
   const showPlaceNames = placeNamesEnabled;
   const showCuriosityImagery = curiosityImageryEnabled;
   const showCuriosityRover = curiosityRoverEnabled;
@@ -3052,6 +3074,7 @@ function applyMapLayersForView(view = currentAppView) {
   setMapLayerVisible(terrainRouteLayerGroup, showTerrainRoute);
   setMapLayerVisible(hazardLayerGroup, showHazards);
   setMapLayerVisible(molaElevationOverlay, showMola);
+  setMapLayerVisible(mgsTesThermalInertia, showThermalInertia);
   setMapLayerVisible(placeNamesLayerGroup, showPlaceNames);
   setMapLayerVisible(curiosityHiRISEImagery, showCuriosityImagery);
   setMapLayerVisible(curiosityTraverseLayerGroup, showCuriosityRover);
@@ -3086,6 +3109,15 @@ if (toggleMolaBtn) {
     applyMapLayersForView(currentAppView);
   });
 }
+
+const toggleThermalInertiaBtn = document.getElementById(
+  'toggleThermalInertiaBtn'
+);
+toggleThermalInertiaBtn?.addEventListener('click', () => {
+  thermalInertiaLayerEnabled = !thermalInertiaLayerEnabled;
+  updateLayerToggle(toggleThermalInertiaBtn, thermalInertiaLayerEnabled);
+  applyMapLayersForView(currentAppView);
+});
 
 const toggleHazardsBtn = document.getElementById('toggleHazardsBtn');
 if (toggleHazardsBtn) {
@@ -3333,6 +3365,7 @@ map.on('mousemove', (e) => {
 
 map.on('moveend zoomend', scheduleNASAPlaceNameRefresh);
 updateLayerToggle(toggleMolaBtn, molaLayerEnabled);
+updateLayerToggle(toggleThermalInertiaBtn, thermalInertiaLayerEnabled);
 updateLayerToggle(toggleHazardsBtn, hazardsLayerEnabled);
 updateLayerToggle(togglePlaceNamesBtn, placeNamesEnabled);
 updateLayerToggle(toggleCuriosityImageryBtn, curiosityImageryEnabled);

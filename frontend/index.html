@@ -222,6 +222,19 @@
         <button
           type="button"
           class="sidebar-layer-toggle"
+          id="toggleThermalInertiaBtn"
+          aria-pressed="false"
+          title="Toggle NASA Mars Trek MGS TES global thermal inertia"
+        >
+          <span class="sidebar-layer-name">
+            <span aria-hidden="true">🌡️</span>
+            <span>MGS TES thermal inertia</span>
+          </span>
+          <span class="sidebar-layer-state" aria-hidden="true">Off</span>
+        </button>
+        <button
+          type="button"
+          class="sidebar-layer-toggle"
           id="toggleHazardsBtn"
           aria-pressed="false"
           title="Toggle terrain hazard zones"
@@ -420,11 +433,12 @@
         <div class="section-title" id="creditsTitle">DATA &amp; SOFTWARE CREDITS</div>
         <p class="info-intro">Mars Navigator uses public Mars mapping and science resources. Source data remains the property of its providers; their use does not imply endorsement.</p>
         <h2>NASA / JPL Mars Trek</h2>
-        <p class="info-intro"><strong>13 live map/data service layers</strong> plus <strong>1 site-image preview</strong> are integrated from NASA/JPL Mars Trek. These are data sources, not 14 NASA software tools.</p>
+        <p class="info-intro"><strong>14 live map/data service layers</strong> plus <strong>1 site-image preview</strong> are integrated from NASA/JPL Mars Trek. These are data sources, not 15 NASA software tools.</p>
         <ul class="credit-list">
           <li><a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_Viking_MDIM21_ClrMosaic_global_232m/ImageServer" target="_blank" rel="noopener noreferrer">Viking MDIM 2.1 global color mosaic</a></li>
           <li><a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_MOLA_blend200ppx_HRSC_ClrShade_clon0dd_200mpp/ImageServer" target="_blank" rel="noopener noreferrer">MOLA/HRSC color-shaded relief</a></li>
           <li><a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_MOLA_blend200ppx_HRSC_DEM_clon0dd_200mpp_lzw/ImageServer" target="_blank" rel="noopener noreferrer">MOLA/HRSC elevation data</a></li>
+          <li><a href="https://trek.nasa.gov/tiles/Mars/EQ/TES_Thermal_Inertia/1.0.0/WMTSCapabilities.xml" target="_blank" rel="noopener noreferrer">MGS TES global thermal inertia</a></li>
           <li><a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/curiosity_hirise_mosaic/ImageServer" target="_blank" rel="noopener noreferrer">Curiosity HiRISE mosaic</a>, <a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/curiosity_path/MapServer/0" target="_blank" rel="noopener noreferrer">traverse</a>, and <a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/curiosity_waypoints/MapServer/0" target="_blank" rel="noopener noreferrer">waypoints</a></li>
           <li><a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/InSightCTXMosaic_112917_gcs/ImageServer" target="_blank" rel="noopener noreferrer">InSight CTX mosaic</a></li>
           <li><a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/Perseverance_Traverse_Path/MapServer/0" target="_blank" rel="noopener noreferrer">Perseverance traverse</a>, <a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/mars2020_waypoints/MapServer/0" target="_blank" rel="noopener noreferrer">named locations</a>, and <a href="https://trek.nasa.gov/mars/trekarcgis/rest/services/perseverance_landing_ellipse/MapServer/0" target="_blank" rel="noopener noreferrer">landing ellipse</a></li>

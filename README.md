@@ -1,6 +1,6 @@
 # Mars Navigator
 
-Mars Navigator is a web application for viewing simulated EVA routes, hazards, suit telemetry, and named surface features on an interactive 3D Mars globe. CesiumJS renders NASA/JPL Mars Trek's Viking MDIM 2.1 global color mosaic on a Mars-sized ellipsoid. Optional map layers start off and can be turned on individually, including MOLA/HRSC terrain, place names, higher-resolution Curiosity and InSight imagery, and Curiosity and Perseverance rover records. Rover locations and details come from NASA Mars Trek and represent map records, not live rover tracking. The API serves mission-planning data from a local JSON file.
+Mars Navigator is a web application for viewing simulated EVA routes, hazards, suit telemetry, and named surface features on an interactive 3D Mars globe. CesiumJS renders NASA/JPL Mars Trek's Viking MDIM 2.1 global color mosaic on a Mars-sized ellipsoid. Optional map layers start off and can be turned on individually, including MOLA/HRSC terrain, MGS TES global thermal inertia, place names, higher-resolution Curiosity and InSight imagery, and Curiosity and Perseverance rover records. Rover locations and details come from NASA Mars Trek and represent map records, not live rover tracking. The API serves mission-planning data from a local JSON file.
 
 ## Project structure
 
@@ -115,7 +115,7 @@ assumptions, resolution limits, and configuration.
 
 The route and telemetry data are local demonstration data, not operational guidance. Mars Trek map imagery and place names require an internet connection. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the project's data, map, and software resources and contribution guidance. Basemap source: [NASA/JPL Mars Trek](https://trek.nasa.gov/mars/), [Viking MDIM 2.1 global color mosaic service](https://trek.nasa.gov/mars/trekarcgis/rest/services/Mars_Viking_MDIM21_ClrMosaic_global_232m/ImageServer).
 
-The in-app **Credits** view counts 13 live NASA/JPL Mars Trek service layers
+The in-app **Credits** view counts 14 live NASA/JPL Mars Trek service layers
 and one Jezero image preview; these are data sources, not NASA software tools.
 The **About** view identifies the NeuroMars team: Rohit Solanki and Gourav
 Jangid.

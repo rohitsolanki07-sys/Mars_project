@@ -51,6 +51,14 @@ explanations to documentation rather than comments inside that file.
   maximum level supported for that source. Optional layers start off; turn on
   each desired overlay individually in the Layers view.
 
+### MGS TES thermal inertia
+
+The Layers view includes an optional, global MGS TES thermal-inertia overlay
+from NASA Mars Trek's
+[TES Thermal Inertia WMTS](https://trek.nasa.gov/tiles/Mars/EQ/TES_Thermal_Inertia/1.0.0/WMTSCapabilities.xml).
+The image tiles cover the full geographic extent and use Mars Trek's
+Mars-centered geographic tiling scheme. The layer is hidden until enabled.
+
 ### Curiosity rover information
 
 The Layers view can show Curiosity's high-resolution Gale Crater image and its
@@ -108,9 +116,10 @@ not filled with invented descriptions.
 
 ### Credits and source count
 
-The in-app Credits view attributes **13 NASA/JPL Mars Trek service layers**:
-three global/MOLA services, three Curiosity services, one InSight image
-service, three Perseverance services, and three nomenclature/feature services.
+The in-app Credits view attributes **14 NASA/JPL Mars Trek service layers**:
+three global/MOLA services, one MGS TES thermal-inertia service, three
+Curiosity services, one InSight image service, three Perseverance services,
+and three nomenclature/feature services.
 The Perseverance Jezero site image is a separate static preview, making one
 additional image asset. These are data services and assets, not NASA software
 tools. The USGS Gazetteer of Planetary Nomenclature is linked as the reference
