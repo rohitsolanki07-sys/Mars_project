@@ -87,6 +87,13 @@
         </div>
       </div>
       <button
+        class="tutorial-launch-btn"
+        id="tutorialLaunchBtn"
+        type="button"
+        aria-label="Open the mission tutorial"
+        title="Mission tutorial"
+      >?</button>
+      <button
         class="theme-toggle-btn"
         id="themeToggleBtn"
         type="button"
@@ -96,6 +103,180 @@
       ><span aria-hidden="true">☾</span></button>
     </div>
   </header>
+
+  <dialog class="tutorial-dialog" id="tutorialDialog" aria-labelledby="tutorialTitle">
+    <div class="tutorial-shell">
+      <header class="tutorial-header">
+        <div>
+          <div class="tutorial-kicker"><span aria-hidden="true"></span> ARES NAV // FIELD GUIDE</div>
+          <h2 id="tutorialTitle">Mission orientation</h2>
+        </div>
+        <button class="tutorial-close-btn" id="tutorialCloseBtn" type="button" aria-label="Close tutorial">×</button>
+      </header>
+      <section class="tutorial-welcome" id="tutorialWelcome" aria-labelledby="tutorialWelcomeTitle" hidden>
+        <div class="tutorial-message">
+          <div class="tutorial-message-label">FIRST CONTACT · OPTIONAL GUIDED TOUR</div>
+          <h3 id="tutorialWelcomeTitle">Welcome to Mars mission control</h3>
+          <p>Want a guided, hands-on tour? We’ll walk through the map, route planner, science layers, mission readouts, and the rest of the console. You can try controls as you go, pause whenever you like, and replay the tour later with <strong>?</strong>.</p>
+          <p class="tutorial-callout">All routes and telemetry are for demonstration only. This application is not certified for real mission use.</p>
+        </div>
+        <div class="tutorial-welcome-actions">
+          <button class="tutorial-next-btn" id="tutorialStartBtn" type="button">Take the tour <span aria-hidden="true">→</span></button>
+          <button class="tutorial-secondary-btn" id="tutorialSkipBtn" type="button">Explore on my own</button>
+        </div>
+      </section>
+      <div class="tutorial-progress" id="tutorialProgress" role="progressbar" aria-label="Tutorial progress" aria-valuemin="1" aria-valuemax="15" aria-valuenow="1" hidden>
+        <span id="tutorialProgressFill"></span>
+      </div>
+      <main class="tutorial-content" id="tutorialContent" aria-live="polite" hidden>
+        <section class="tutorial-step" aria-label="Step 1 of 15" data-tour-view="map" data-tour-target="#globeZoomIn">
+          <div class="tutorial-step-number">01 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">SURFACE OPERATIONS · MAP CONTROLS</div>
+            <h3>Move around the Mars globe</h3>
+            <p><strong>Map</strong> opens the full globe. Drag it to rotate, use <strong>+</strong> and <strong>−</strong> to zoom, and press <strong>◎</strong> to return to the global view. Try each control while this guide stays open.</p>
+            <p>Choose <strong>Full screen</strong> to resize the map. Move the pointer over the surface to read coordinates; select a mapped feature for its details. The sidebar arrow switches between Map and Planner.</p>
+          </div>
+        </section>
+        <section class="tutorial-step" aria-label="Step 2 of 15" data-tour-view="planner" data-tour-target="#siteSelect" hidden>
+          <div class="tutorial-step-number">02 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">MISSION SETUP · LANDING SITE</div>
+            <h3>Choose a mission site</h3>
+            <p>Use this selector to switch between <strong>Mount Sharp (Gale Crater)</strong> and <strong>Jezero Crater</strong>. The route, waypoints, and sample mission estimates update for the selected site. The <strong>↻</strong> button reloads the route.</p>
+            <p>Try switching sites, then return to your preferred one. Site data is a local demonstration dataset, not a live mission feed.</p>
+          </div>
+        </section>
+        <section class="tutorial-step" aria-label="Step 3 of 15" data-tour-view="planner" data-tour-target="#departureSelect" hidden>
+          <div class="tutorial-step-number">03 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">MISSION SETUP · SAVED WAYPOINTS</div>
+            <h3>Set route start and destination</h3>
+            <p>Choose a <strong>FROM</strong> and <strong>TO</strong> location from the menus. Options include saved mission waypoints and, when online data is available, named Mars features and science candidates.</p>
+            <p>Try changing an endpoint. The route summary updates; select a waypoint in the list to center the map on it, or use <strong>Overview</strong> to fit the route on screen.</p>
+          </div>
+        </section>
+        <section class="tutorial-step" aria-label="Step 4 of 15" data-tour-view="planner" data-tour-target="#pickDepartureBtn" hidden>
+          <div class="tutorial-step-number">04 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">MISSION SETUP · CUSTOM ENDPOINTS</div>
+            <h3>Pick a point on the map or enter coordinates</h3>
+            <p>Choose <strong>Pick start on map</strong> or <strong>Pick destination on map</strong>, then click the desired surface location. Open <strong>Enter custom coordinates</strong> to enter latitude and longitude directly instead.</p>
+            <p>Try either method; selecting a point on the map leaves the planner ready to continue. Coordinate inputs are in decimal degrees.</p>
+          </div>
+        </section>
+        <section class="tutorial-step" aria-label="Step 5 of 15" data-tour-view="planner" data-tour-target=".travel-modes" hidden>
+          <div class="tutorial-step-number">05 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">ROUTE CONTROL · TRAVEL MODES</div>
+            <h3>Compare suit, rover, and scout estimates</h3>
+            <p>Select <strong>Suit Walk</strong>, <strong>Rover</strong>, or <strong>Scout</strong>. The travel mode changes the modeled speed and resource estimates shown for the route.</p>
+            <p>Try each mode and compare the estimated duration and oxygen/battery use. These are planning estimates, not vehicle telemetry.</p>
+          </div>
+        </section>
+        <section class="tutorial-step" aria-label="Step 6 of 15" data-tour-view="planner" data-tour-target="#startNavBtn" hidden>
+          <div class="tutorial-step-number">06 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">ROUTE CONTROL · EVA SIMULATION</div>
+            <h3>Start and stop the route simulation</h3>
+            <p>Choose <strong>Start EVA Navigation</strong> to play the simulated turn-by-turn route. The navigation banner shows the current instruction; choose <strong>Exit</strong> in that banner to stop.</p>
+            <p>Try starting and exiting the simulation. It is a visual demonstration—not live navigation or control of a rover.</p>
+          </div>
+        </section>
+        <section class="tutorial-step" aria-label="Step 7 of 15" data-tour-view="planner" data-tour-target="#calculateTerrainRouteBtn" hidden>
+          <div class="tutorial-step-number">07 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">SCIENCE CONSOLE · EXPERIMENTAL ROUTING</div>
+            <h3>Request a terrain-aware science route</h3>
+            <p>Choose a grid spacing, then select <strong>Find a geology-aware science route</strong>. The experimental route model combines NASA MOLA elevation, coarse MGS TES thermal-map transitions, USGS geology context, and known site hazards.</p>
+            <p>If a route is returned, review its statistics, confidence notes, and review flags. <strong>Download offline route briefing</strong> saves a text summary. Live NASA data may be unavailable, so try this feature when online.</p>
+            <p class="tutorial-callout">Low-confidence orbital estimates cannot detect small or changing hazards and are not certified for mission use.</p>
+          </div>
+        </section>
+        <section class="tutorial-step" aria-label="Step 8 of 15" data-tour-view="telemetry" data-tour-target="#telemetrySection .section-title" hidden>
+          <div class="tutorial-step-number">08 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">CREW SYSTEMS · TELEMETRY</div>
+            <h3>Read the modeled surface and suit gauges</h3>
+            <p>The <strong>Telemetry</strong> view shows the selected site's sample temperature, pressure, and radiation values, plus estimated oxygen and battery remaining for the current route.</p>
+            <p>Open the view and inspect each readout. They are static/demo estimates—not live sensor values.</p>
+          </div>
+        </section>
+        <section class="tutorial-step" aria-label="Step 9 of 15" data-tour-view="hazards" data-tour-target="#hazardList" hidden>
+          <div class="tutorial-step-number">09 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">CREW SYSTEMS · HAZARD ADVISORIES</div>
+            <h3>Inspect the site's hazard information</h3>
+            <p>Open <strong>Hazards</strong> to read the selected demonstration site's terrain advisories. Select a hazard card to focus its location on the map; the <strong>Hazard zones</strong> overlay is also available in Layers.</p>
+            <p>Hazard cards describe the sample site data. A custom direct route is not automatically checked or rerouted around them.</p>
+          </div>
+        </section>
+        <section class="tutorial-step" aria-label="Step 10 of 15" data-tour-view="layers" data-tour-target="#toggleMolaBtn" hidden>
+          <div class="tutorial-step-number">10 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">REMOTE SENSING · TERRAIN &amp; SCIENCE LAYERS</div>
+            <h3>Turn map overlays on and off</h3>
+            <p>In <strong>Layers</strong>, try <strong>MOLA color-shaded terrain</strong>, <strong>MGS TES thermal inertia</strong>, <strong>Global geology</strong>, <strong>Hydrous mineral detections</strong>, and <strong>Exploration zones</strong>. Each toggle adds or removes its overlay; combine layers when useful.</p>
+            <p>These orbital maps show regional context and candidate locations, not confirmed surface conditions, access, or safety.</p>
+          </div>
+        </section>
+        <section class="tutorial-step" aria-label="Step 11 of 15" data-tour-view="layers" data-tour-target="#togglePlaceNamesBtn" hidden>
+          <div class="tutorial-step-number">11 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">REMOTE SENSING · PLACE NAMES &amp; HAZARD OVERLAY</div>
+            <h3>Find named surface features</h3>
+            <p>Turn on <strong>NASA place names</strong> to show labels for the current map area. Click a label for available feature details and source links; the status bar reports place-name loading. Enable <strong>Hazard zones</strong> here to show the selected site's mapped advisory areas.</p>
+            <p>NASA Mars Trek map and place-name services require an internet connection.</p>
+          </div>
+        </section>
+        <section class="tutorial-step" aria-label="Step 12 of 15" data-tour-view="layers" data-tour-target="#toggleCuriosityImageryBtn" hidden>
+          <div class="tutorial-step-number">12 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">ROVER ARCHIVE · CURIOSITY</div>
+            <h3>Explore Curiosity's Gale Crater records</h3>
+            <p>Try <strong>Curiosity HiRISE image</strong> and <strong>Curiosity traverse &amp; stops</strong>. Use <strong>Go to Gale Crater</strong> to focus the map; when rover stops are loaded, open <strong>Browse named rover stops</strong> to visit a record.</p>
+            <p>These are historical NASA Mars Trek records, not a live rover position.</p>
+          </div>
+        </section>
+        <section class="tutorial-step" aria-label="Step 13 of 15" data-tour-view="layers" data-tour-target="#togglePerseveranceImageryBtn" hidden>
+          <div class="tutorial-step-number">13 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">ROVER ARCHIVE · PERSEVERANCE &amp; INSIGHT</div>
+            <h3>Explore Jezero and InSight map products</h3>
+            <p>Try the <strong>Perseverance site image</strong> and <strong>Perseverance traverse &amp; site</strong> toggles. Focus Jezero with <strong>Go to Jezero Crater</strong>, then browse named locations when loaded. These overlays include the historical traverse and landing ellipse.</p>
+            <p>The <strong>InSight CTX image</strong> toggle adds another orbital surface image. Rover records are historical; imagery and landing context do not show live status.</p>
+          </div>
+        </section>
+        <section class="tutorial-step" aria-label="Step 14 of 15" data-tour-view="credits" data-tour-target="#creditsTitle" hidden>
+          <div class="tutorial-step-number">14 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">REFERENCE DESK · CREDITS</div>
+            <h3>Check the data and software sources</h3>
+            <p>The <strong>Credits</strong> view links the Mars Trek imagery and data services, USGS references, and software used by the project. Open a source link when you want to inspect its provider information.</p>
+            <p>Source providers do not endorse this project. External links require an internet connection.</p>
+          </div>
+        </section>
+        <section class="tutorial-step" aria-label="Step 15 of 15" data-tour-view="about" data-tour-target="#aboutTitle" hidden>
+          <div class="tutorial-step-number">15 <span>/ 15</span></div>
+          <div class="tutorial-message">
+            <div class="tutorial-message-label">MISSION COMPLETE · PROJECT &amp; CONTROLS</div>
+            <h3>Know the project and make the console yours</h3>
+            <p><strong>About</strong> introduces the NeuroMars project and team. Use the sun/moon control to change the theme; select <strong>?</strong> whenever you want to replay this field guide.</p>
+            <p>The CesiumJS browser app displays Mars Trek imagery and requests sample mission data from the local Express API; saved mission sites live in <strong>backend/Data/marsData.json</strong>.</p>
+            <p class="tutorial-callout">This is a research/demo application—not an operational navigation system. NASA/USGS data can be incomplete or unavailable and cannot replace validated mission systems or expert review.</p>
+          </div>
+        </section>
+      </main>
+      <footer class="tutorial-footer" id="tutorialFooter" hidden>
+        <span class="tutorial-step-status" id="tutorialStepStatus" aria-live="polite">STEP 01 / 15</span>
+        <div class="tutorial-controls">
+          <button class="tutorial-secondary-btn" id="tutorialPauseBtn" type="button">Hide &amp; try it</button>
+          <button class="tutorial-secondary-btn" id="tutorialPreviousBtn" type="button" disabled>Back</button>
+          <button class="tutorial-next-btn" id="tutorialNextBtn" type="button">Next step <span aria-hidden="true">→</span></button>
+        </div>
+      </footer>
+    </div>
+  </dialog>
 
   <!-- Top-Center Turn-by-Turn Active Navigation Banner (Google Maps Navigation HUD) -->
   <div id="navBanner" class="nav-hud-banner hidden">

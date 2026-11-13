@@ -2,6 +2,16 @@
 
 Mars Navigator is a web application for viewing simulated EVA routes, hazards, suit telemetry, and named surface features on an interactive 3D Mars globe. CesiumJS renders NASA/JPL Mars Trek's Viking MDIM 2.1 global color mosaic on a Mars-sized ellipsoid. Optional map layers start off and can be turned on individually, including MOLA/HRSC terrain, MGS TES global thermal inertia, place names, higher-resolution Curiosity and InSight imagery, and Curiosity and Perseverance rover records. Rover locations and details come from NASA Mars Trek and represent map records, not live rover tracking. The API serves mission-planning data from a local JSON file.
 
+## In-app field guide
+
+At each launch, choose **Take the tour** for a guided, hands-on walkthrough or
+**Explore on my own** to go straight to the app. The 15-step field guide points
+out the map, route planner, simulations, telemetry, hazards, individual
+science/rover layers, credits, and project information. Its non-blocking guide
+card moves beside the feature being explained. Select **Hide & try it** to
+explore and use **?** to resume or replay the guide. Its step-by-step planetary
+mapping approach is inspired by experiences such as NASA Mars Trek.
+
 ## Project structure
 
 ```text

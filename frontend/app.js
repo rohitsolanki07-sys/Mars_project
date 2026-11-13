@@ -3743,6 +3743,195 @@ document.querySelectorAll('button[data-app-view]').forEach((button) => {
   button.addEventListener('click', () => navigateToAppView(button.dataset.appView));
 });
 
+const tutorialDialog = document.getElementById('tutorialDialog');
+const tutorialSteps = Array.from(document.querySelectorAll('.tutorial-step'));
+const tutorialProgress = tutorialDialog?.querySelector('.tutorial-progress');
+const tutorialProgressFill = document.getElementById('tutorialProgressFill');
+const tutorialStepStatus = document.getElementById('tutorialStepStatus');
+const tutorialPreviousBtn = document.getElementById('tutorialPreviousBtn');
+const tutorialNextBtn = document.getElementById('tutorialNextBtn');
+const tutorialWelcome = document.getElementById('tutorialWelcome');
+const tutorialContent = document.getElementById('tutorialContent');
+const tutorialFooter = document.getElementById('tutorialFooter');
+const tutorialPauseBtn = document.getElementById('tutorialPauseBtn');
+let currentTutorialStep = 0;
+let tutorialTarget = null;
+let tutorialInProgress = false;
+
+function clearTutorialTarget() {
+  tutorialTarget?.classList.remove('tutorial-target');
+  tutorialTarget = null;
+}
+
+function positionTutorialNearTarget() {
+  if (!tutorialDialog?.open || tutorialDialog.matches(':modal')) return;
+
+  const margin = 12;
+  const gap = 14;
+  const panel = tutorialDialog.getBoundingClientRect();
+  const target = tutorialTarget?.getBoundingClientRect();
+  const panelWidth = panel.width;
+  const panelHeight = panel.height;
+  const anchor = target || {
+    left: window.innerWidth / 2,
+    right: window.innerWidth / 2,
+    top: window.innerHeight / 2,
+    bottom: window.innerHeight / 2,
+    width: 0,
+    height: 0
+  };
+  const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
+  const centerX = anchor.left + anchor.width / 2;
+  const centerY = anchor.top + anchor.height / 2;
+  const candidates = [
+    { left: centerX - panelWidth / 2, top: anchor.top - panelHeight - gap },
+    { left: centerX - panelWidth / 2, top: anchor.bottom + gap },
+    { left: anchor.left - panelWidth - gap, top: centerY - panelHeight / 2 },
+    { left: anchor.right + gap, top: centerY - panelHeight / 2 }
+  ];
+
+  const positioned = candidates.map((candidate) => {
+    const left = clamp(candidate.left, margin, window.innerWidth - panelWidth - margin);
+    const top = clamp(candidate.top, margin, window.innerHeight - panelHeight - margin);
+    const overlapWidth = target
+      ? Math.max(0, Math.min(left + panelWidth, anchor.right) - Math.max(left, anchor.left))
+      : 0;
+    const overlapHeight = target
+      ? Math.max(0, Math.min(top + panelHeight, anchor.bottom) - Math.max(top, anchor.top))
+      : 0;
+    const overlapArea = overlapWidth * overlapHeight;
+    const displacement = Math.abs(left - candidate.left) + Math.abs(top - candidate.top);
+    return { left, top, score: overlapArea * 10000 + displacement };
+  }).sort((a, b) => a.score - b.score);
+
+  const position = positioned[0];
+  tutorialDialog.style.inset = 'auto';
+  tutorialDialog.style.left = `${position.left}px`;
+  tutorialDialog.style.top = `${position.top}px`;
+  tutorialDialog.style.right = 'auto';
+  tutorialDialog.style.bottom = 'auto';
+}
+
+function scheduleTutorialPosition() {
+  window.requestAnimationFrame(positionTutorialNearTarget);
+  window.setTimeout(positionTutorialNearTarget, 350);
+}
+
+function showTutorialStep(stepIndex) {
+  if (!tutorialSteps.length) return;
+  currentTutorialStep = Math.max(0, Math.min(stepIndex, tutorialSteps.length - 1));
+  const step = tutorialSteps[currentTutorialStep];
+  const nextView = step.dataset.tourView;
+  if (nextView && currentAppView !== nextView) navigateToAppView(nextView);
+
+  tutorialSteps.forEach((step, index) => {
+    step.hidden = index !== currentTutorialStep;
+  });
+  clearTutorialTarget();
+  const targetSelector = step.dataset.tourTarget;
+  tutorialTarget = targetSelector ? document.querySelector(targetSelector) : null;
+  tutorialTarget?.classList.add('tutorial-target');
+  tutorialTarget?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  scheduleTutorialPosition();
+
+  const stepNumber = currentTutorialStep + 1;
+  const progressPercent = (stepNumber / tutorialSteps.length) * 100;
+  tutorialProgress?.setAttribute('aria-valuenow', String(stepNumber));
+  tutorialProgressFill?.style.setProperty('width', `${progressPercent}%`);
+  if (tutorialStepStatus) {
+    tutorialStepStatus.textContent =
+      `STEP ${String(stepNumber).padStart(2, '0')} / ${String(tutorialSteps.length).padStart(2, '0')}`;
+  }
+  if (tutorialPreviousBtn) tutorialPreviousBtn.disabled = currentTutorialStep === 0;
+  if (tutorialNextBtn) {
+    tutorialNextBtn.innerHTML = currentTutorialStep === tutorialSteps.length - 1
+      ? 'Finish tour <span aria-hidden="true">✓</span>'
+      : 'Next step <span aria-hidden="true">→</span>';
+  }
+}
+
+function showTutorialWelcome() {
+  if (!tutorialDialog || tutorialDialog.open) return;
+  tutorialWelcome.hidden = false;
+  tutorialProgress.hidden = true;
+  tutorialContent.hidden = true;
+  tutorialFooter.hidden = true;
+  tutorialDialog.showModal();
+}
+
+function startTutorial() {
+  if (!tutorialDialog) return;
+  if (tutorialDialog.open) tutorialDialog.close();
+  tutorialInProgress = true;
+  tutorialWelcome.hidden = true;
+  tutorialProgress.hidden = false;
+  tutorialContent.hidden = false;
+  tutorialFooter.hidden = false;
+  showTutorialStep(0);
+  tutorialDialog.show();
+  scheduleTutorialPosition();
+}
+
+function openTutorial() {
+  if (!tutorialDialog || tutorialDialog.open) return;
+  if (tutorialInProgress) {
+    tutorialWelcome.hidden = true;
+    tutorialProgress.hidden = false;
+    tutorialContent.hidden = false;
+    tutorialFooter.hidden = false;
+    showTutorialStep(currentTutorialStep);
+    tutorialDialog.show();
+    scheduleTutorialPosition();
+    return;
+  }
+  startTutorial();
+}
+
+function skipTutorial() {
+  tutorialWelcome.hidden = true;
+  clearTutorialTarget();
+  tutorialDialog?.close();
+}
+
+document.getElementById('tutorialLaunchBtn')?.addEventListener('click', openTutorial);
+document.getElementById('tutorialCloseBtn')?.addEventListener('click', () => {
+  if (tutorialWelcome && !tutorialWelcome.hidden) {
+    skipTutorial();
+  } else {
+    clearTutorialTarget();
+    tutorialDialog?.close();
+  }
+});
+document.getElementById('tutorialStartBtn')?.addEventListener('click', startTutorial);
+document.getElementById('tutorialSkipBtn')?.addEventListener('click', skipTutorial);
+tutorialPauseBtn?.addEventListener('click', () => {
+  clearTutorialTarget();
+  tutorialDialog?.close();
+});
+tutorialPreviousBtn?.addEventListener('click', () => {
+  showTutorialStep(currentTutorialStep - 1);
+});
+tutorialNextBtn?.addEventListener('click', () => {
+  if (currentTutorialStep === tutorialSteps.length - 1) {
+    tutorialInProgress = false;
+    clearTutorialTarget();
+    tutorialDialog?.close();
+    return;
+  }
+  showTutorialStep(currentTutorialStep + 1);
+});
+tutorialDialog?.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  if (tutorialWelcome && !tutorialWelcome.hidden) {
+    skipTutorial();
+  } else {
+    clearTutorialTarget();
+    tutorialDialog.close();
+  }
+});
+window.addEventListener('resize', scheduleTutorialPosition);
+document.addEventListener('scroll', scheduleTutorialPosition, true);
+
 // Live Cursor Coordinates Tracker
 const cursorCoords = document.getElementById('cursorCoords');
 map.on('mousemove', (e) => {
@@ -3771,3 +3960,4 @@ if (siteSelect) {
 }
 scheduleNASAPlaceNameRefresh();
 loadMissionRoute();
+showTutorialWelcome();
