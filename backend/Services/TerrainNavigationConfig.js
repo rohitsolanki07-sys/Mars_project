@@ -28,6 +28,14 @@ module.exports = Object.freeze({
     }),
     roughnessNeighborhoodRadiusCells: 1
   }),
+  craterDetection: Object.freeze({
+    annulusRadiiCells: Object.freeze([2, 3, 4, 5, 6, 8]),
+    annulusHalfWidthCells: 0.75,
+    minimumElevatedSectors: 7,
+    minimumDepthMeters: 20,
+    minimumDepthPerCellMeters: 0.04,
+    safetyBufferCells: 1
+  }),
   hazards: Object.freeze({
     defaultBufferMeters: 350,
     minimumBufferMeters: 0,

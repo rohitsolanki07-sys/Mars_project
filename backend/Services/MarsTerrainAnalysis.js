@@ -239,6 +239,198 @@ function getAxisGradient(center, before, after, spacing) {
   return null;
 }
 
+function getCraterDepthThresholdMeters(grid) {
+  const config = CONFIG.craterDetection;
+  return Math.max(
+    config.minimumDepthMeters,
+    grid.resolutionMeters * config.minimumDepthPerCellMeters
+  );
+}
+
+function getDepressionRing(grid, row, column, radiusCells, gradientX, gradientY) {
+  const elevation = getElevation(grid, row, column);
+  const latitude = gridCellToCoordinate(grid, row, column).latitude;
+  const eastSpacing =
+    grid.resolutionMeters *
+    Math.cos(latitude * DEG_TO_RAD) /
+    Math.max(Math.cos(grid.centerLatitude * DEG_TO_RAD), 0.01);
+  const halfWidth = CONFIG.craterDetection.annulusHalfWidthCells;
+  const searchRadius = Math.ceil(radiusCells + halfWidth);
+  const sectorTotals = new Array(8).fill(0);
+  const sectorCounts = new Array(8).fill(0);
+
+  for (let rowOffset = -searchRadius; rowOffset <= searchRadius; rowOffset += 1) {
+    for (
+      let columnOffset = -searchRadius;
+      columnOffset <= searchRadius;
+      columnOffset += 1
+    ) {
+      if (rowOffset === 0 && columnOffset === 0) continue;
+      const offsetX = columnOffset * eastSpacing;
+      const offsetY = rowOffset * grid.resolutionMeters;
+      const distanceCells =
+        Math.hypot(offsetX, offsetY) / grid.resolutionMeters;
+      if (Math.abs(distanceCells - radiusCells) > halfWidth) continue;
+
+      const sample = getElevation(
+        grid,
+        row + rowOffset,
+        column + columnOffset
+      );
+      if (sample === null) continue;
+      const expectedElevation =
+        elevation + gradientX * offsetX + gradientY * offsetY;
+      const sector = Math.floor(
+        (Math.atan2(offsetY, offsetX) + Math.PI + Math.PI / 8) /
+          (Math.PI / 4)
+      ) % 8;
+      sectorTotals[sector] += sample - expectedElevation;
+      sectorCounts[sector] += 1;
+    }
+  }
+
+  const sectorMeans = sectorTotals
+    .map((total, sector) =>
+      sectorCounts[sector] > 0 ? total / sectorCounts[sector] : null
+    )
+    .filter(Number.isFinite);
+  return {
+    elevatedSectors: sectorMeans.filter(
+      (difference) =>
+        difference >= getCraterDepthThresholdMeters(grid)
+    ).length,
+    meanRelief:
+      sectorMeans.length > 0
+        ? sectorMeans.reduce((sum, difference) => sum + difference, 0) /
+          sectorMeans.length
+        : null
+  };
+}
+
+function applyCraterDepressionMask(grid, cells) {
+  const config = CONFIG.craterDetection;
+  const maximumRadiusCells =
+    Math.max(...config.annulusRadiiCells) + config.safetyBufferCells;
+  const maskBuffer = config.safetyBufferCells;
+  const minimumDepthMeters = getCraterDepthThresholdMeters(grid);
+  const candidates = [];
+
+  for (let row = 0; row < grid.rows; row += 1) {
+    for (let column = 0; column < grid.columns; column += 1) {
+      const elevation = getElevation(grid, row, column);
+      if (elevation === null) continue;
+
+      const latitude = gridCellToCoordinate(grid, row, column).latitude;
+      const eastSpacing =
+        grid.resolutionMeters *
+        Math.cos(latitude * DEG_TO_RAD) /
+        Math.max(Math.cos(grid.centerLatitude * DEG_TO_RAD), 0.01);
+      const gradientX = getAxisGradient(
+        elevation,
+        getElevation(grid, row, column - 1),
+        getElevation(grid, row, column + 1),
+        eastSpacing
+      );
+      const gradientY = getAxisGradient(
+        elevation,
+        getElevation(grid, row - 1, column),
+        getElevation(grid, row + 1, column),
+        grid.resolutionMeters
+      );
+      if (gradientX === null || gradientY === null) continue;
+
+      const rings = config.annulusRadiiCells.map((radiusCells) => ({
+        radiusCells,
+        ...getDepressionRing(
+          grid,
+          row,
+          column,
+          radiusCells,
+          gradientX,
+          gradientY
+        )
+      }));
+      let depression = null;
+      for (let index = 0; index < rings.length; index += 1) {
+        const ring = rings[index];
+        if (
+          ring.elevatedSectors < config.minimumElevatedSectors ||
+          ring.meanRelief < minimumDepthMeters
+        ) {
+          continue;
+        }
+        const nextRing = rings[index + 1];
+        if (!nextRing || nextRing.meanRelief === null ||
+            nextRing.meanRelief <= ring.meanRelief) {
+          depression = ring;
+          break;
+        }
+        depression = ring;
+      }
+      if (depression) {
+        candidates.push({ row, column, ...depression });
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    const latitude = gridCellToCoordinate(
+      grid,
+      candidate.row,
+      candidate.column
+    ).latitude;
+    const eastSpacing =
+      grid.resolutionMeters *
+      Math.cos(latitude * DEG_TO_RAD) /
+      Math.max(Math.cos(grid.centerLatitude * DEG_TO_RAD), 0.01);
+    const radiusCells = Math.min(
+      maximumRadiusCells,
+      candidate.radiusCells + maskBuffer
+    );
+    const searchRadius = Math.ceil(radiusCells);
+
+    for (
+      let rowOffset = -searchRadius;
+      rowOffset <= searchRadius;
+      rowOffset += 1
+    ) {
+      for (
+        let columnOffset = -searchRadius;
+        columnOffset <= searchRadius;
+        columnOffset += 1
+      ) {
+        const distanceMeters = Math.hypot(
+          rowOffset * grid.resolutionMeters,
+          columnOffset * eastSpacing
+        );
+        if (distanceMeters > radiusCells * grid.resolutionMeters) continue;
+        const row = candidate.row + rowOffset;
+        const column = candidate.column + columnOffset;
+        const index = row * grid.columns + column;
+        if (
+          row < 0 ||
+          row >= grid.rows ||
+          column < 0 ||
+          column >= grid.columns ||
+          cells[index].state === TERRAIN_STATES.UNKNOWN
+        ) {
+          continue;
+        }
+        cells[index].blockedByCrater = true;
+        cells[index].craterDepthMeters = Math.max(
+          cells[index].craterDepthMeters,
+          candidate.meanRelief
+        );
+        cells[index].craterRadiusMeters = Math.max(
+          cells[index].craterRadiusMeters,
+          candidate.radiusCells * grid.resolutionMeters
+        );
+        cells[index].state = TERRAIN_STATES.RESTRICTED;
+      }
+    }
+  }
+}
+
 function analyzeTerrain(grid, hazards = [], geologyZones = []) {
   const totalCells = grid.rows * grid.columns;
   if (
@@ -270,7 +462,10 @@ function analyzeTerrain(grid, hazards = [], geologyZones = []) {
     hazardPenalty: 0,
     geologyPenalty: 0,
     geologyCategories: [],
-    blockedByHazard: false
+    blockedByHazard: false,
+    blockedByCrater: false,
+    craterDepthMeters: 0,
+    craterRadiusMeters: 0
   }));
   const terrainConfig = CONFIG.terrain;
   const thresholdScale = Math.max(
@@ -362,7 +557,10 @@ function analyzeTerrain(grid, hazards = [], geologyZones = []) {
         hazardPenalty: 0,
         geologyPenalty: 0,
         geologyCategories: [],
-        blockedByHazard: false
+        blockedByHazard: false,
+        blockedByCrater: false,
+        craterDepthMeters: 0,
+        craterRadiusMeters: 0
       };
     }
   }
@@ -410,6 +608,7 @@ function analyzeTerrain(grid, hazards = [], geologyZones = []) {
       cell.geologyPenalty;
   });
 
+  applyCraterDepressionMask(grid, cellAnalysis);
   return cellAnalysis;
 }
 
@@ -1051,7 +1250,11 @@ function calculateRoute(
   const blockedUnknownCells = cells.filter(
     (cell) => cell.state === TERRAIN_STATES.UNKNOWN
   ).length;
+  const craterCellsAvoided = cells.filter(
+    (cell) => cell.blockedByCrater
+  ).length;
   const totalCells = grid.rows * grid.columns;
+  const craterDepthThresholdMeters = getCraterDepthThresholdMeters(grid);
 
   return {
     status: 'ROUTE_FOUND',
@@ -1091,6 +1294,14 @@ function calculateRoute(
       ? Math.max(...slopeValues)
       : null,
     terrainClassCounts: classCounts,
+    craterAvoidance: {
+      blockedCells: craterCellsAvoided,
+      minimumDetectableDiameterMeters:
+        CONFIG.craterDetection.annulusRadiiCells[0] *
+        2 *
+        grid.resolutionMeters,
+      minimumDepthMeters: craterDepthThresholdMeters
+    },
     geologyZoneCounts,
     geologyZonesConsidered,
     thermalInertia: {
@@ -1104,7 +1315,7 @@ function calculateRoute(
       level: 'LOW',
       score: 0.25,
       reason:
-        `MOLA cannot detect foot-scale hazards. The TES layer is sampled as a coarse color-transition cue, not calibrated numeric thermal inertia. USGS global geology is regional-scale and does not confirm surface materials or ice. Terrain-relief thresholds are scaled by ${Math.max(1, grid.resolutionMeters / CONFIG.grid.defaultResolutionMeters).toFixed(1)}x for this grid spacing; fine terrain between coarse samples is not assessed. This experimental route is not astronaut-certified.`,
+        `Crater avoidance blocks sampled cells that appear to lie inside closed MOLA depressions at least about ${CONFIG.craterDetection.annulusRadiiCells[0] * 2 * grid.resolutionMeters} m wide and ${craterDepthThresholdMeters.toFixed(0)} m deep. This cannot guarantee a crater-free route: smaller, shallow, partly sampled, or otherwise unresolved craters may be missed. MOLA cannot detect foot-scale hazards. The TES layer is sampled as a coarse color-transition cue, not calibrated numeric thermal inertia. USGS global geology is regional-scale and does not confirm surface materials or ice. Terrain-relief thresholds are scaled by ${Math.max(1, grid.resolutionMeters / CONFIG.grid.defaultResolutionMeters).toFixed(1)}x for this grid spacing; fine terrain between coarse samples is not assessed. This experimental route is not astronaut-certified.`,
       sourceResolutionMeters: metadata.sourceResolutionMeters ?? null,
       planningResolutionMeters: grid.resolutionMeters,
       nominalHorizontalUncertaintyMeters:

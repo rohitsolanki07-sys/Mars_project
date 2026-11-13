@@ -3174,6 +3174,7 @@ function renderTerrainNavigationResult(route) {
     `Route cells — preferred: ${classCounts.SAFE_CANDIDATE || 0}, caution: ${classCounts.CAUTION || 0}, high risk: ${classCounts.HIGH_RISK || 0}`,
     `Sampled area coverage: ${route.terrainCoveragePercent.toFixed(1)}%`,
     `Restricted cells excluded: ${route.restrictedCellsAvoided}; unknown cells blocked: ${route.unknownCellsBlocked}`,
+    `Crater-like depression cells excluded: ${route.craterAvoidance?.blockedCells || 0} (minimum detectable scale about ${route.craterAvoidance?.minimumDetectableDiameterMeters || 0} m wide, ${route.craterAvoidance?.minimumDepthMeters?.toFixed(0) || 0} m deep)`,
     `USGS zone features considered — hazards: ${geologyZones.hazard || 0}, potential water/ice: ${geologyZones.water_ice_target || 0}, lowland/basin: ${geologyZones.preferred_transit || 0}, Amazonian volcanic: ${geologyZones.volcanic_habitat_candidate || 0}`,
     `Route cells in preferred geology — potential water/ice: ${geologyCounts.water_ice_target || 0}, lowland/basin: ${geologyCounts.preferred_transit || 0}, volcanic habitat candidates: ${geologyCounts.volcanic_habitat_candidate || 0}`,
     `TES thermal layer: ${route.thermalInertia?.sampledCells || 0} grid samples; relative color-transition cost ${route.thermalInertia?.transitionScore?.toFixed(2) ?? '0.00'}`,
@@ -3215,6 +3216,7 @@ function getTerrainRouteReviewItems(route) {
   const cautionCells = terrainClasses.CAUTION || 0;
   const highRiskCells = terrainClasses.HIGH_RISK || 0;
   const unknownCells = route.unknownCellsBlocked || 0;
+  const craterAvoidance = route.craterAvoidance || {};
   const coverage = Number.isFinite(route.terrainCoveragePercent)
     ? route.terrainCoveragePercent
     : null;
@@ -3225,6 +3227,9 @@ function getTerrainRouteReviewItems(route) {
     .filter((distance) => Number.isFinite(distance) && distance >= 1);
   const reviewFlags = [];
 
+  reviewFlags.push(
+    `${craterAvoidance.blockedCells || 0} sampled cells overlapping crater-like closed depressions were excluded. MOLA resolution cannot guarantee a crater-free route.`
+  );
   if (cautionCells > 0) {
     reviewFlags.push(
       `${cautionCells} route cells are classed as caution based on sampled slope, roughness, or elevation change.`
@@ -3308,6 +3313,7 @@ function downloadTerrainRouteBriefing(route) {
     `Terrain grid spacing: ${route.grid.resolutionMeters.toFixed(0)} m`,
     `Planning-grid elevation coverage: ${route.terrainCoveragePercent.toFixed(1)}%`,
     `Terrain class cells — caution: ${route.terrainClassCounts.CAUTION || 0}, high risk: ${route.terrainClassCounts.HIGH_RISK || 0}`,
+    `Crater-like depression cells excluded: ${route.craterAvoidance?.blockedCells || 0}`,
     `TES thermal samples: ${route.thermalInertia?.sampledCells || 0}; relative color-transition cost: ${route.thermalInertia?.transitionScore?.toFixed(2) ?? '0.00'} (not a calibrated thermal-inertia value)`,
     `Known restricted cells avoided: ${route.restrictedCellsAvoided}`,
     '',

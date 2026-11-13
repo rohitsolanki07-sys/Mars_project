@@ -158,16 +158,26 @@ spacing varies with latitude. Choosing a finer planning grid does not add
 detail to the source elevation data.
 
 The backend analyzes slope, local elevation variation, and known hazard
-buffers, then uses A* search with eight-direction movement. Local relief is
-measured after removing the neighborhood's estimated planar slope, so a smooth
-incline is evaluated as slope rather than incorrectly treated as roughness.
+buffers, and DEM-detected closed depressions, then uses A* search with
+eight-direction movement. Crater-like depressions are detected by comparing
+slope-adjusted elevations in six sampled annuli against the center elevation;
+at least seven of eight surrounding sectors must show a lower center. Detected
+basins are blocked with a one-cell safety buffer. The configured minimum
+annulus radius is two planning cells, so the approximate minimum detectable
+diameter is four times the actual grid spacing; the minimum depth threshold is
+the greater of 20 metres or 4% of that spacing. Local relief is measured after
+removing the neighborhood's estimated planar slope, so a smooth incline is
+evaluated as slope rather than incorrectly treated as roughness.
 Roughness and elevation-change thresholds scale with planning-cell spacing to
 avoid applying metre-scale limits to coarse cells on long routes. Steep slopes,
-restricted hazards, and unknown/NoData cells remain blocked, and diagonal
-moves cannot cut between blocked cells. The local distance calculation is an
-approximation on Mars; the output is intentionally labelled low confidence.
-MOLA cannot resolve small rocks, cracks, or astronaut-scale hazards, and the
-result is not certified for mission use. The slope, roughness,
+restricted hazards, detected depressions, and unknown/NoData cells remain
+blocked, and diagonal moves cannot cut between blocked cells. Depression
+detection is a conservative DEM heuristic, not a crater catalogue; small,
+shallow, undersampled, or poorly resolved crater interiors may be missed, so
+the output cannot be described as crater-free. The local distance calculation
+is an approximation on Mars; the output is intentionally labelled low
+confidence. MOLA cannot resolve small rocks, cracks, or astronaut-scale
+hazards, and the result is not certified for mission use. The slope, roughness,
 elevation-change, and cost thresholds are prototype assumptions, not NASA
 human-traverse standards or NASA-endorsed route recommendations.
 

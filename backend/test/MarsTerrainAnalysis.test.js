@@ -89,6 +89,7 @@ test('a smooth incline is classified by slope, not mistaken for roughness', () =
   assert.ok(center.roughnessMeters < 0.01);
   assert.ok(center.maxElevationChangeMeters < 0.01);
   assert.equal(center.state, TERRAIN_STATES.CAUTION);
+  assert.equal(center.blockedByCrater, false);
 });
 
 test('local roughness identifies high-relief cells without inventing obstacle data', () => {
@@ -97,6 +98,42 @@ test('local roughness identifies high-relief cells without inventing obstacle da
   const center = analyzeTerrain(grid)[3 * grid.columns + 3];
   assert.ok(center.roughnessMeters > 10);
   assert.equal(center.state, TERRAIN_STATES.RESTRICTED);
+});
+
+test('crater-like closed depressions are blocked and routes detour around them', () => {
+  const grid = flatGrid(21, 21, 500);
+  const centerRow = 10;
+  const centerColumn = 10;
+  for (let row = 0; row < grid.rows; row += 1) {
+    for (let column = 0; column < grid.columns; column += 1) {
+      const distance = Math.hypot(row - centerRow, column - centerColumn);
+      let elevation = 0;
+      if (distance <= 2) elevation = -100;
+      else if (distance <= 4) elevation = -100 + (distance - 2) * 50;
+      else if (distance <= 4.5) elevation = (distance - 4) * 160;
+      else if (distance <= 5) elevation = 80 - (distance - 4.5) * 160;
+      grid.elevations[row * grid.columns + column] = elevation;
+    }
+  }
+  grid.startCell = { row: centerRow, column: 1 };
+  grid.destinationCell = { row: centerRow, column: 19 };
+  grid.start = gridCellToCoordinate(grid, centerRow, 1);
+  grid.destination = gridCellToCoordinate(grid, centerRow, 19);
+
+  const analyzed = analyzeTerrain(grid);
+  const center = analyzed[centerRow * grid.columns + centerColumn];
+  const innerRim = analyzed[centerRow * grid.columns + centerColumn + 3];
+  const outside = analyzed[2 * grid.columns + 2];
+  assert.equal(center.blockedByCrater, true);
+  assert.equal(innerRim.blockedByCrater, true);
+  assert.equal(center.state, TERRAIN_STATES.RESTRICTED);
+  assert.equal(outside.blockedByCrater, false);
+
+  const result = calculateRoute(grid);
+  assert.ok(result.totalDistanceMeters > 18 * grid.resolutionMeters);
+  assert.ok(result.craterAvoidance.blockedCells > 0);
+  assert.ok(result.routeCells.every((cell) => !cell.blockedByCrater));
+  assert.match(result.confidence.reason, /cannot guarantee a crater-free route/);
 });
 
 test('known circular hazards and their configured buffer are impassable', () => {

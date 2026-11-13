@@ -78,7 +78,10 @@ destination on map** to choose custom coordinates. The standard mission summary
 is still a direct point-to-point estimate. To request an experimental terrain-
 aware path between the selected endpoints, choose a grid spacing and click
 **Find a lower-risk terrain route**. It uses NASA Mars Trek's live elevation
-service and the selected mission site's known hazards.
+service and the selected mission site's known hazards. It also blocks sampled
+cells identified as closed, crater-like depressions. This screening is limited
+by the actual terrain-grid spacing; it cannot guarantee a crater-free route.
+The standard direct route estimate does not perform this depression screening.
 When a terrain route is found, the planner also shows modeled review flags and
 can download an offline text briefing with sampled route points and limitations.
 If an endpoint falls on unknown or restricted terrain, the planner can move it
