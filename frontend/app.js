@@ -344,6 +344,13 @@ function getOverlayNode(entity) {
   return element;
 }
 
+function markOverlayManagedLabel(entity) {
+  if (!entity || !entity.label) return entity;
+  entity.__overlayManagedLabel = true;
+  entity.label.show = false;
+  return entity;
+}
+
 function getOverlayLabelNode(entity) {
   let overlay = marsOverlayNodes.get(entity.id);
   if (overlay?.type === 'label') return overlay.element;
@@ -433,7 +440,11 @@ function renderMarsEntityOverlay() {
     }
 
     const label = entity.label;
-    if (!label || getOverlayPropertyValue(label.show, time) === false) return;
+    if (!label) return;
+    if (entity.__overlayManagedLabel !== true) {
+      entity.__overlayManagedLabel = true;
+      label.show = false;
+    }
     const labelNode = getOverlayLabelNode(entity);
     const text = getOverlayPropertyValue(label.text, time) || '';
     labelNode.textContent = text;
@@ -492,16 +503,6 @@ function renderMarsEntityOverlay() {
       point && getOverlayPropertyValue(label.showBackground, time)
     );
     labelNode.classList.toggle('mars-globe-place-label', isPlaceLabel);
-    labelNode.classList.toggle('mars-globe-point-label', Boolean(point));
-    if (point) {
-      const pointColor = getOverlayPropertyValue(point.color, time);
-      const pointSize = getOverlayPropertyValue(point.pixelSize, time) || 8;
-      labelNode.style.setProperty(
-        '--mars-marker-color',
-        pointColor?.toCssColorString?.() || '#60a5fa'
-      );
-      labelNode.style.setProperty('--mars-marker-size', `${pointSize}px`);
-    }
 
     labelNode.dataset.horizontalOrigin =
       horizontalOrigin === Cesium.HorizontalOrigin.LEFT
@@ -1611,6 +1612,7 @@ async function loadCuriosityRoverData() {
             disableDepthTestDistance: 0
           }
         });
+        markOverlayManagedLabel(entity);
         entity.isCuriosityWaypoint = true;
         entity.mapPopup = createCuriosityWaypointPopup(waypoint);
         curiosityWaypointLayerGroup.addLayer(entity);
@@ -1751,6 +1753,7 @@ async function loadPerseveranceRoverData() {
             disableDepthTestDistance: 0
           }
         });
+        markOverlayManagedLabel(entity);
         entity.mapPopup = createPerseveranceWaypointPopup(waypoint);
         perseveranceWaypointLayerGroup.addLayer(entity);
       });
@@ -1870,6 +1873,7 @@ function renderNASAPlaces(places, bounds, warnings) {
         disableDepthTestDistance: 0
       }
     });
+    markOverlayManagedLabel(entity);
     entity.mapPopup = createPlacePopup(place);
     placeNamesLayerGroup.addLayer(entity);
     visibleLabelCount += 1;
@@ -2421,7 +2425,7 @@ async function loadMissionRoute() {
         position: Cesium.Cartesian3.fromDegrees(
           coord[1],
           coord[0],
-          1200,
+          50,
           MARS_ELLIPSOID
         ),
         point: {
@@ -2442,6 +2446,7 @@ async function loadMissionRoute() {
           disableDepthTestDistance: 0
         }
       });
+      markOverlayManagedLabel(marker);
       marker.mapPopup = popup;
       poiLayerGroup.addLayer(marker);
     });
@@ -2499,7 +2504,7 @@ function startNavigationSimulation() {
     position: Cesium.Cartesian3.fromDegrees(
       currentWaypoints[0][1],
       currentWaypoints[0][0],
-      1200,
+      50,
       MARS_ELLIPSOID
     ),
     label: {
@@ -2509,6 +2514,7 @@ function startNavigationSimulation() {
       disableDepthTestDistance: 0
     }
   });
+  markOverlayManagedLabel(navMarker);
   poiLayerGroup.addLayer(navMarker);
 
   // Build interpolated points across segments
@@ -2543,7 +2549,7 @@ function startNavigationSimulation() {
     navMarker.position = Cesium.Cartesian3.fromDegrees(
       pt.coord[1],
       pt.coord[0],
-      1200,
+      50,
       MARS_ELLIPSOID
     );
     if (navInstruction) {
@@ -2781,7 +2787,7 @@ function renderTerrainNavigationResult(route) {
       position: Cesium.Cartesian3.fromDegrees(
         coordinate.longitude,
         coordinate.latitude,
-        1200,
+        50,
         MARS_ELLIPSOID
       ),
       point: {
@@ -2804,6 +2810,7 @@ function renderTerrainNavigationResult(route) {
         disableDepthTestDistance: 0
       }
     });
+    markOverlayManagedLabel(marker);
     marker.mapPopup = createMapPopup(name, [
       [
         'Coordinates',
