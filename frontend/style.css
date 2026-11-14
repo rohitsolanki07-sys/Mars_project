@@ -296,9 +296,39 @@ body[data-app-view="about"] .nav-sidebar-body {
 
 /* Header & Search Bar */
 .nav-sidebar-header {
+  flex-shrink: 0;
+  max-height: none;
   padding: 16px 18px 14px;
   border-bottom: 1px solid var(--border-subtle);
   background: rgba(15, 19, 29, 0.65);
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Firefox thin scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.3) rgba(0, 0, 0, 0.1);
+}
+
+.nav-sidebar-header::-webkit-scrollbar {
+  width: 8px;
+}
+
+.nav-sidebar-header::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  margin: 4px 0;
+}
+
+.nav-sidebar-header::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.nav-sidebar-header::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 .brand-row {
@@ -557,6 +587,25 @@ body[data-app-view="about"] .nav-sidebar-body {
   color: #bfdbfe;
 }
 
+/* Endpoint row: loading state while a picked coordinate is being resolved.
+   A subtle pulse on the select and a spinner-like label on the pick button
+   let the user know the previous destination was cleared and a new one is loading. */
+.endpoint-row.endpoint-loading .endpoint-select {
+  opacity: 0.45;
+  pointer-events: none;
+  animation: endpoint-pulse 1.1s ease-in-out infinite;
+}
+
+.endpoint-row.endpoint-loading .pick-map-btn {
+  animation: endpoint-pulse 1.1s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes endpoint-pulse {
+  0%, 100% { opacity: 0.45; }
+  50%       { opacity: 0.9;  }
+}
+
 .map-pick-status {
   min-height: 0;
   color: #bfdbfe;
@@ -699,21 +748,42 @@ body[data-app-view="about"] .nav-sidebar-body {
 
 /* Sidebar Scrollable Body */
 .nav-sidebar-body {
-  flex: 1;
+  flex: 1 1 0;      /* flex-basis 0 + flex-shrink 1 lets the body shrink below
+                       its content height so overflow-y: auto actually fires */
+  min-height: 0;    /* required in a flex column: without this the item cannot
+                       shrink past its content and the scrollbar never appears */
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 14px 18px 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* Firefox thin scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.3) rgba(0, 0, 0, 0.1);
 }
 
 .nav-sidebar-body::-webkit-scrollbar {
-  width: 5px;
+  width: 8px;
+}
+
+.nav-sidebar-body::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  margin: 4px 0;
 }
 
 .nav-sidebar-body::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.nav-sidebar-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 #telemetrySection,

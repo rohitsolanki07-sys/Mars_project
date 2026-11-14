@@ -872,6 +872,47 @@ function findNearestTraversableCell(grid, cells, coordinate) {
   return nearest;
 }
 
+// Search the entire grid for the nearest traversable cell,
+// ignoring the fixed snap-distance limit. Used when no traversable
+// cell exists within the normal snap radius.
+function findNearestTraversableAnywhere(grid, cells, coordinate) {
+  const originCell = coordinateToGridCell(grid, coordinate);
+  let nearest = null;
+  for (let row = 0; row < grid.rows; row += 1) {
+    for (let column = 0; column < grid.columns; column += 1) {
+      if (!isCellTraversable(cells[row * grid.columns + column])) continue;
+      const cellCoord = gridCellToCoordinate(grid, row, column);
+      const dist = surfaceDistanceMeters(coordinate, cellCoord);
+      if (!nearest || dist < nearest.distance) {
+        nearest = { cell: { row, column }, coordinate: cellCoord, distance: dist };
+      }
+    }
+  }
+  return nearest;
+}
+
+// Build a straight great-circle chain of grid cells from start to destination.
+// Used as the last-resort fallback when A* cannot find any grid-based path.
+function buildDirectChain(grid) {
+  const steps = Math.max(
+    2,
+    Math.ceil(surfaceDistanceMeters(grid.start, grid.destination) / grid.resolutionMeters)
+  );
+  const path = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    const lat = grid.start.latitude + t * (grid.destination.latitude - grid.start.latitude);
+    const lonDelta = normalizeLongitudeDelta(grid.destination.longitude - grid.start.longitude);
+    const lon = grid.start.longitude + t * lonDelta;
+    path.push(coordinateToGridCell(grid, { latitude: lat, longitude: lon }));
+  }
+  // Deduplicate consecutive identical cells.
+  return path.filter(
+    (cell, i) =>
+      i === 0 || cell.row !== path[i - 1].row || cell.column !== path[i - 1].column
+  );
+}
+
 function pointInPolygon(point, polygon) {
   let inside = false;
   for (
@@ -967,17 +1008,32 @@ function isCellTraversable(cell) {
   );
 }
 
-function findLowestCostPath(grid, cells, thermalColors) {
+// Relaxed mode: hazard/geology RESTRICTED cells become passable (at high cost),
+// but crater-blocked cells are still excluded.
+function isCellTraversableRelaxed(cell) {
+  if (cell.state === TERRAIN_STATES.UNKNOWN) return false;
+  if (cell.state !== TERRAIN_STATES.RESTRICTED) return true;
+  // Keep craters impassable in relaxed mode.
+  return !cell.blockedByCrater;
+}
+
+// Permissive mode: everything except UNKNOWN is passable.
+// Used as a last resort when even relaxed mode cannot find a path.
+function isCellTraversablePermissive(cell) {
+  return cell.state !== TERRAIN_STATES.UNKNOWN;
+}
+
+function findLowestCostPath(grid, cells, thermalColors, traversabilityFn = isCellTraversable) {
   const start = grid.startCell;
   const destination = grid.destinationCell;
   const startIndex = start.row * grid.columns + start.column;
   const destinationIndex =
     destination.row * grid.columns + destination.column;
-  if (!isCellTraversable(cells[startIndex])) {
-    throw new Error('The starting coordinate has missing or restricted terrain data.');
+  if (!traversabilityFn(cells[startIndex])) {
+    return null;
   }
-  if (!isCellTraversable(cells[destinationIndex])) {
-    throw new Error('The destination has missing or restricted terrain data.');
+  if (!traversabilityFn(cells[destinationIndex])) {
+    return null;
   }
 
   const totalCells = grid.rows * grid.columns;
@@ -987,7 +1043,7 @@ function findLowestCostPath(grid, cells, thermalColors) {
   parent.fill(-1);
   const closed = new Uint8Array(totalCells);
   const open = new MinHeap();
-  const minimumCostScore = minimumCellCostScore(cells);
+  const minimumCostScore = minimumCellCostScore(cells, traversabilityFn);
   gScore[startIndex] = 0;
   open.push({
     index: startIndex,
@@ -1026,13 +1082,13 @@ function findLowestCostPath(grid, cells, thermalColors) {
         continue;
       }
       const nextIndex = nextRow * grid.columns + nextColumn;
-      if (closed[nextIndex] || !isCellTraversable(cells[nextIndex])) continue;
+      if (closed[nextIndex] || !traversabilityFn(cells[nextIndex])) continue;
       if (rowOffset !== 0 && columnOffset !== 0) {
         const horizontalIndex = row * grid.columns + nextColumn;
         const verticalIndex = nextRow * grid.columns + column;
         if (
-          !isCellTraversable(cells[horizontalIndex]) ||
-          !isCellTraversable(cells[verticalIndex])
+          !traversabilityFn(cells[horizontalIndex]) ||
+          !traversabilityFn(cells[verticalIndex])
         ) {
           continue;
         }
@@ -1082,13 +1138,13 @@ function findLowestCostPath(grid, cells, thermalColors) {
     }
   }
 
-  throw new Error('No safe route exists through the available terrain grid.');
+  return null; // No path found; caller will apply fallback strategy.
 }
 
-function minimumCellCostScore(cells) {
+function minimumCellCostScore(cells, traversabilityFn = isCellTraversable) {
   let minimum = Infinity;
   for (const cell of cells) {
-    if (isCellTraversable(cell)) minimum = Math.min(minimum, cell.costScore);
+    if (traversabilityFn(cell)) minimum = Math.min(minimum, cell.costScore);
   }
   return Number.isFinite(minimum) ? minimum : 0;
 }
@@ -1274,53 +1330,72 @@ function calculateRoute(
         requestedDestinationCell.column
     ]
   );
-  if (coordinateInsideRestrictedHazard(
-    grid,
-    requestedStart,
-    hazards,
-    geologyZones
-  )) {
-    throw new Error('The starting coordinate is inside a restricted hazard area.');
+  // Note endpoint hazard warnings but do not throw — the router will find
+  // the safest available path and report the warning to the caller.
+  const endpointWarnings = { start: null, destination: null };
+  if (coordinateInsideRestrictedHazard(grid, requestedStart, hazards, geologyZones)) {
+    endpointWarnings.start = 'Start coordinate is inside a restricted hazard area; routing from nearest safe terrain.';
   }
-  if (coordinateInsideRestrictedHazard(
-    grid,
-    requestedDestination,
-    hazards,
-    geologyZones
-  )) {
-    throw new Error('The destination is inside a restricted hazard area.');
+  if (coordinateInsideRestrictedHazard(grid, requestedDestination, hazards, geologyZones)) {
+    endpointWarnings.destination = 'Destination is inside a restricted hazard area; routing to nearest safe terrain.';
   }
-  const start = findNearestTraversableCell(grid, cells, requestedStart);
+
+  // Snap endpoints to nearest traversable cell. If the strict snap fails,
+  // search the whole grid. If the whole grid has no traversable cell, use the
+  // nearest grid cell regardless of traversability.
+  let start = findNearestTraversableCell(grid, cells, requestedStart);
   if (!start) {
-    throw new Error(
-      `No traversable terrain was found within ${Math.max(CONFIG.endpoints.maximumSnapDistanceMeters, grid.resolutionMeters)} metres of the starting coordinate.`
-    );
+    start = findNearestTraversableAnywhere(grid, cells, requestedStart);
   }
-  const destination = findNearestTraversableCell(
-    grid,
-    cells,
-    requestedDestination
-  );
+  if (!start) {
+    // Absolute fallback: nearest grid cell ignoring traversability.
+    const originCell = coordinateToGridCell(grid, requestedStart);
+    start = {
+      cell: originCell,
+      coordinate: gridCellToCoordinate(grid, originCell.row, originCell.column),
+      distance: 0
+    };
+  }
+  let destination = findNearestTraversableCell(grid, cells, requestedDestination);
   if (!destination) {
-    throw new Error(
-      `No traversable terrain was found within ${Math.max(CONFIG.endpoints.maximumSnapDistanceMeters, grid.resolutionMeters)} metres of the destination.`
-    );
+    destination = findNearestTraversableAnywhere(grid, cells, requestedDestination);
   }
-  if (
-    start.cell.row === destination.cell.row &&
-    start.cell.column === destination.cell.column &&
-    surfaceDistanceMeters(requestedStart, requestedDestination) >
-      grid.resolutionMeters
-  ) {
-    throw new Error(
-      'No safe route exists between the selected endpoints at the available terrain resolution.'
-    );
+  if (!destination) {
+    const destCell = coordinateToGridCell(grid, requestedDestination);
+    destination = {
+      cell: destCell,
+      coordinate: gridCellToCoordinate(grid, destCell.row, destCell.column),
+      distance: 0
+    };
   }
+
   grid.startCell = start.cell;
   grid.destinationCell = destination.cell;
   grid.start = start.coordinate;
   grid.destination = destination.coordinate;
-  const path = findLowestCostPath(grid, cells, thermalColors);
+
+  // ── Progressive path search ───────────────────────────────────────────────
+  // Level 1: strict (all hazards/craters/geology RESTRICTED = impassable)
+  let path = findLowestCostPath(grid, cells, thermalColors, isCellTraversable);
+  let routingMode = 'strict';
+
+  // Level 2: relaxed hazards (hazard/geology RESTRICTED → high cost, craters still blocked)
+  if (!path) {
+    path = findLowestCostPath(grid, cells, thermalColors, isCellTraversableRelaxed);
+    routingMode = 'relaxed_hazards';
+  }
+
+  // Level 3: fully permissive (even craters become high-cost, only UNKNOWN blocked)
+  if (!path) {
+    path = findLowestCostPath(grid, cells, thermalColors, isCellTraversablePermissive);
+    routingMode = 'permissive';
+  }
+
+  // Level 4: direct great-circle chain (no grid avoidance — absolute last resort)
+  if (!path) {
+    path = buildDirectChain(grid);
+    routingMode = 'direct_chain';
+  }
   const gridCoordinates = path.map(({ row, column }) =>
     gridCellToCoordinate(grid, row, column)
   );
@@ -1370,18 +1445,23 @@ function calculateRoute(
       else elevationLossMeters -= elevationChange;
     }
   }
-  if (traversedCellIndices.length === 0) {
+  if (traversedCellIndices.length === 0 && path.length > 0) {
     traversedCellIndices.push(path[0].row * grid.columns + path[0].column);
   }
   const routeCells = traversedCellIndices.map((index) => cells[index]);
-  const startCell = cells[path[0].row * grid.columns + path[0].column];
-  const destinationCell =
-    cells[path.at(-1).row * grid.columns + path.at(-1).column];
-  accumulatedTerrainCost +=
-    surfaceDistanceMeters(grid.start, gridCoordinates[0]) *
-      startCell.costScore +
-    surfaceDistanceMeters(gridCoordinates.at(-1), grid.destination) *
-      destinationCell.costScore;
+  const startCell = path.length > 0
+    ? cells[path[0].row * grid.columns + path[0].column]
+    : { costScore: 1 };
+  const destinationCell = path.length > 0
+    ? cells[path.at(-1).row * grid.columns + path.at(-1).column]
+    : { costScore: 1 };
+  if (gridCoordinates.length > 0) {
+    accumulatedTerrainCost +=
+      surfaceDistanceMeters(grid.start, gridCoordinates[0]) *
+        startCell.costScore +
+      surfaceDistanceMeters(gridCoordinates.at(-1), grid.destination) *
+        destinationCell.costScore;
+  }
 
   const knownRouteCells = routeCells.filter(
     (cell) => cell.state !== TERRAIN_STATES.UNKNOWN
@@ -1417,7 +1497,8 @@ function calculateRoute(
   const craterDepthThresholdMeters = getCraterDepthThresholdMeters(grid);
 
   return {
-    status: 'ROUTE_FOUND',
+    status: routingMode === 'strict' ? 'ROUTE_FOUND' : routingMode === 'relaxed_hazards' ? 'ROUTE_FOUND_RELAXED_HAZARDS' : routingMode === 'permissive' ? 'ROUTE_FOUND_PERMISSIVE' : 'FALLBACK_DIRECT_CHAIN',
+    routingMode,
     start: grid.start,
     destination: grid.destination,
     requestedStart,
@@ -1430,6 +1511,7 @@ function calculateRoute(
       startMeters: start.distance,
       destinationMeters: destination.distance
     },
+    endpointWarnings,
     routeCoordinates: coordinates,
     routeCells: traversedCellIndices.map((index) => {
       const row = Math.floor(index / grid.columns);
@@ -1479,6 +1561,14 @@ function calculateRoute(
       level: 'LOW',
       score: 0.25,
       reason:
+        (routingMode === 'direct_chain'
+          ? 'FALLBACK: No grid-based safe path was possible — route is a direct great-circle chain with no terrain avoidance. '
+          : routingMode === 'permissive'
+          ? 'WARNING: Route passes through crater-blocked or restricted terrain because no fully safe path exists. Inspect every segment carefully. '
+          : routingMode === 'relaxed_hazards'
+          ? 'CAUTION: Route passes through hazard or geology restricted zones because no fully clear path exists. Use maximum caution. '
+          : ''
+        ) +
         `Crater avoidance blocks sampled cells that appear to lie inside closed MOLA depressions at least about ${CONFIG.craterDetection.annulusRadiiCells[0] * 2 * grid.resolutionMeters} m wide and ${craterDepthThresholdMeters.toFixed(0)} m deep. This cannot guarantee a crater-free route: smaller, shallow, partly sampled, or otherwise unresolved craters may be missed. MOLA cannot detect foot-scale hazards. The TES layer is sampled as a coarse color-transition cue, not calibrated numeric thermal inertia. USGS global geology is regional-scale and does not confirm surface materials or ice. Terrain-relief thresholds are scaled by ${Math.max(1, grid.resolutionMeters / CONFIG.grid.defaultResolutionMeters).toFixed(1)}x for this grid spacing; fine terrain between coarse samples is not assessed. This experimental route is not astronaut-certified.`,
       sourceResolutionMeters: metadata.sourceResolutionMeters ?? null,
       planningResolutionMeters: grid.resolutionMeters,

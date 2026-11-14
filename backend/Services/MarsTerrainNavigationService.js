@@ -55,41 +55,51 @@ async function calculateTerrainAwareRoute(request) {
   };
   const routeData = await loadRouteData(options);
   const { terrain, environment } = routeData;
-  let route;
-  try {
-    route = calculateRoute(
-      terrain.grid,
-      hazards,
-      terrain.metadata,
-      environment
-    );
-  } catch (error) {
-    if (
-      !error.message.startsWith('No traversable terrain was found within') &&
-      !error.message.startsWith('No safe route exists')
-    ) {
-      throw error;
-    }
-  }
+  // Attempt the route at the requested resolution.
+  // calculateRoute now always returns a route (using progressive fallback),
+  // so this should never throw a "no route" error. We still re-throw
+  // unexpected errors (data, type, range errors from bad inputs).
+  let route = calculateRoute(
+    terrain.grid,
+    hazards,
+    terrain.metadata,
+    environment
+  );
 
+  // If both endpoints landed on traversable cells AND the route is strict
+  // (not a fallback), we're done — no retry needed.
   if (
-    route &&
     !route.endpointSearchRequired.start &&
-    !route.endpointSearchRequired.destination
+    !route.endpointSearchRequired.destination &&
+    route.routingMode === 'strict'
   ) {
     return route;
   }
 
-  const expandedRouteData = await loadRouteData({
-    ...options,
-    endpointSearchRangeMeters: CONFIG.endpoints.maximumSnapDistanceMeters
-  });
-  return calculateRoute(
-    expandedRouteData.terrain.grid,
-    hazards,
-    expandedRouteData.terrain.metadata,
-    expandedRouteData.environment
-  );
+  // One or both endpoints needed snapping. Re-run with an expanded grid that
+  // guarantees endpoint search coverage, then return whichever result is better
+  // (shorter or higher-confidence routing mode).
+  try {
+    const expandedRouteData = await loadRouteData({
+      ...options,
+      endpointSearchRangeMeters: CONFIG.endpoints.maximumSnapDistanceMeters
+    });
+    const expandedRoute = calculateRoute(
+      expandedRouteData.terrain.grid,
+      hazards,
+      expandedRouteData.terrain.metadata,
+      expandedRouteData.environment
+    );
+    // Prefer the expanded route unless the original had a stricter routing mode.
+    const modeRank = { strict: 0, relaxed_hazards: 1, permissive: 2, direct_chain: 3 };
+    const originalRank = modeRank[route.routingMode] ?? 3;
+    const expandedRank = modeRank[expandedRoute.routingMode] ?? 3;
+    return expandedRank <= originalRank ? expandedRoute : route;
+  } catch (_) {
+    // If the expanded attempt fails for any unexpected reason, return the
+    // original route — something is always better than nothing.
+    return route;
+  }
 }
 
 module.exports = { calculateTerrainAwareRoute };

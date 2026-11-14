@@ -311,10 +311,7 @@ app.post('/api/navigation/terrain', async (req, res) => {
     const statusCode =
       err instanceof TypeError || err instanceof RangeError
         ? 400
-        : err.message.startsWith('No safe route exists') ||
-            err.message.startsWith('No traversable terrain was found') ||
-            err.message.includes('starting coordinate') ||
-            err.message.includes('destination has missing or restricted')
+        : false // route calculation always returns a result now
           ? 422
           : 502;
     if (statusCode === 502) {

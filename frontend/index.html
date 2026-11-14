@@ -375,14 +375,15 @@
         <label for="terrainResolutionSelect">Terrain grid spacing</label>
         <select id="terrainResolutionSelect" aria-label="Terrain grid spacing">
           <option value="1000">Coarse · 1,000 m</option>
-          <option value="500" selected>Standard · 500 m</option>
-          <option value="250">Detailed · 250 m</option>
+          <option value="500">Standard · 500 m</option>
+          <option value="250" selected>Detailed · 250 m</option>
+          <option value="100">High detail · 100 m (slower)</option>
         </select>
         <button type="button" class="primary-nav-btn" id="calculateTerrainRouteBtn">
           Find a geology-aware science route
         </button>
         <p id="terrainRouteStatus" class="map-pick-status" role="status" aria-live="polite"></p>
-        <p class="terrain-safety-note">Experimental only: combines MOLA relief, coarse TES thermal-map transitions, and USGS geology preferences. Not certified for mission use.</p>
+        <p class="terrain-safety-note">Experimental only: combines MOLA relief, coarse TES thermal-map transitions, and USGS geology preferences. Detects pits, craters, rough terrain, and steep slopes at the selected grid spacing. Not certified for mission use.</p>
       </div>
     </div>
 

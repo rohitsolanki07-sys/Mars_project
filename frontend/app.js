@@ -2052,6 +2052,15 @@ function scheduleNASAPlaceNameRefresh() {
   placeNamesRefreshTimer = setTimeout(refreshNASAPlaceNames, 250);
 }
 
+// Mark an endpoint row as loading (pending pick) or done.
+// 'endpoint' is 'departure' or 'arrival'.
+function setEndpointRowLoading(endpoint, loading) {
+  const selectEl = document.getElementById(`${endpoint}Select`);
+  const row = selectEl?.closest('.endpoint-row');
+  if (!row) return;
+  row.classList.toggle('endpoint-loading', loading);
+}
+
 function updateMapPickControls() {
   const status = document.getElementById('mapPickStatus');
   const departureButton = document.getElementById('pickDepartureBtn');
@@ -2072,6 +2081,12 @@ function updateMapPickControls() {
 }
 
 function beginMapPointSelection(endpoint) {
+  // If the other pick button is already active, cancel it first so only one
+  // endpoint is ever in pick mode at a time and its button resets cleanly.
+  if (endpoint && mapPickMode && mapPickMode !== endpoint) {
+    mapPickMode = null;
+    updateMapPickControls();
+  }
   mapPickMode = endpoint;
   updateMapPickControls();
 }
@@ -2148,6 +2163,7 @@ async function setCustomEndpoint(endpoint, latitude, longitude) {
   customEndpointLocations[endpoint] = location;
   selectedNASAEndpointLocations[endpoint] = null;
   cancelMapPointSelection();
+  setEndpointRowLoading(endpoint, false);
   populateRouteSelectors(currentSiteDetails);
   document.getElementById(`${endpoint}Select`).value = location.id;
   syncCoordinateInputs(
@@ -2166,6 +2182,15 @@ function selectCustomMapPoint(latlng) {
   const endpoint = mapPickMode;
   const latitude = Number(latlng.lat.toFixed(5));
   const longitude = Number(latlng.lng.toFixed(5));
+
+  // Give immediate visual feedback: clear the existing route and mark the
+  // endpoint row as loading before the async elevation lookup starts.
+  clearTerrainNavigationRoute();
+  routeLayerGroup.clearLayers();
+  poiLayerGroup.clearLayers();
+  hazardLayerGroup.clearLayers();
+  setEndpointRowLoading(endpoint, true);
+
   setCustomEndpoint(endpoint, latitude, longitude);
 }
 
@@ -2826,7 +2851,9 @@ function getTerrainRouteHazards() {
         longitude: hazard.coords[1]
       },
       radiusMeters: hazard.radius_meters || 0,
-      bufferMeters: 350,
+      // Increased buffer gives the router more clearance around known hazard
+      // zones so the path steers well clear of pit rims and boulder fields.
+      bufferMeters: 500,
       restricted: true
     }));
 }

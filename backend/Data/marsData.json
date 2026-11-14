@@ -20,7 +20,7 @@
         "danger_level": "CRITICAL",
         "slope_deg": 28,
         "coords": [-4.6700, 137.4500],
-        "radius_meters": 450
+        "radius_meters": 600
       }
     ],
     "telemetry": {
@@ -58,7 +58,7 @@
         "danger_level": "WARNING",
         "slope_deg": 22,
         "coords": [18.4800, 77.4000],
-        "radius_meters": 600
+        "radius_meters": 800
       }
     ],
     "telemetry": {
