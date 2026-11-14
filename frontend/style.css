@@ -62,10 +62,10 @@ html, body {
   left: 50%;
   transform: translateX(-50%);
   width: min(calc(100% - 32px), 1600px);
-  min-height: 68px;
+  min-height: 84px;
   padding: 9px 16px;
   display: grid;
-  grid-template-columns: minmax(185px, 1fr) auto minmax(185px, 1fr);
+  grid-template-columns: minmax(210px, 1fr) auto minmax(185px, 1fr);
   align-items: center;
   gap: 18px;
   z-index: 1200;
@@ -4642,5 +4642,497 @@ html[data-theme="dark"] .mars-place-popup h3 {
 
   .tutorial-target {
     animation: none;
+  }
+}
+
+/* AresNav Mars-horizon identity */
+:root {
+  --bg-glass: rgba(255, 250, 245, 0.9);
+  --bg-card: #fffaf6;
+  --bg-card-hover: #fff1e7;
+  --bg-input: #fff7f0;
+  --border-subtle: rgba(101, 61, 36, 0.16);
+  --text-primary: #251b15;
+  --text-secondary: #77685e;
+  --accent-blue: #ed6b24;
+  --accent-blue-hover: #d95717;
+  --accent-green: #31875e;
+  --accent-amber: #bf741d;
+  --accent-red: #d95349;
+  --shadow-floating: 0 24px 70px rgba(34, 20, 12, 0.2),
+    0 4px 14px rgba(34, 20, 12, 0.08);
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  --bg-glass: rgba(12, 10, 9, 0.94);
+  --bg-card: rgba(24, 19, 16, 0.96);
+  --bg-card-hover: rgba(41, 28, 20, 0.98);
+  --bg-input: rgba(9, 8, 7, 0.92);
+  --border-subtle: rgba(255, 146, 75, 0.19);
+  --text-primary: #f8f2ed;
+  --text-secondary: #c1b2a7;
+  --accent-blue: #ff8129;
+  --accent-blue-hover: #ff9a4a;
+  --accent-green: #72c994;
+  --accent-amber: #f2b456;
+  --accent-red: #f07869;
+  --shadow-floating: 0 28px 80px rgba(0, 0, 0, 0.5),
+    0 5px 18px rgba(0, 0, 0, 0.24);
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: #090807;
+}
+
+.app-brand {
+  min-width: 0;
+}
+
+.app-brand-logo {
+  display: block;
+  width: 200px;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 0 12px rgba(235, 91, 24, 0.22));
+}
+
+.app-navbar,
+.nav-sidebar {
+  background: var(--bg-glass);
+  border-color: var(--border-subtle);
+}
+
+.brand-pin {
+  color: #f97324;
+  filter: drop-shadow(0 2px 8px rgba(249, 115, 36, 0.45));
+}
+
+.brand-logo h1 {
+  color: var(--text-primary);
+}
+
+.brand-subtitle {
+  color: var(--text-secondary);
+  letter-spacing: 0.07em;
+}
+
+.app-nav-icon,
+.mola-legend h4,
+.mars-place-popup h3 {
+  color: #e96820;
+}
+
+.app-nav-link.active,
+.mode-tab.active,
+.sidebar-layer-toggle.active,
+.layer-pill.active,
+.step-item.active,
+.globe-view-toggle[aria-pressed="true"] {
+  border-color: rgba(239, 109, 36, 0.4);
+  background: rgba(239, 109, 36, 0.15);
+  color: #bd4d14;
+}
+
+.app-nav-link:focus-visible,
+.app-brand:focus-visible,
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+summary:focus-visible {
+  outline-color: rgba(239, 109, 36, 0.7);
+}
+
+.search-box-wrapper:focus-within,
+.endpoint-select:focus,
+.coordinate-form input:focus {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(239, 109, 36, 0.18);
+}
+
+.icon-action-btn,
+.pick-map-btn:hover,
+.pick-map-btn.active {
+  border-color: rgba(239, 109, 36, 0.38);
+  background: rgba(239, 109, 36, 0.14);
+  color: #bd4d14;
+}
+
+.primary-nav-btn,
+.primary-nav-btn.active {
+  border-color: rgba(255, 184, 120, 0.28);
+  background: linear-gradient(135deg, #ff9b4a, #f16b22 58%, #d94d16);
+  color: #fffaf6;
+  box-shadow: 0 8px 26px rgba(221, 78, 20, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.primary-nav-btn:hover {
+  background: linear-gradient(135deg, #ffae67, #fb7b2c 58%, #e95b1b);
+}
+
+.secondary-nav-btn:hover,
+.sidebar-layer-toggle:hover,
+.step-item:hover {
+  border-color: rgba(239, 109, 36, 0.24);
+}
+
+.tutorial-launch-btn {
+  border-color: rgba(249, 115, 36, 0.5);
+  background: linear-gradient(145deg, rgba(164, 73, 24, 0.46), rgba(38, 20, 12, 0.9));
+  color: #ffd1a8;
+  box-shadow: inset 0 0 12px rgba(249, 115, 36, 0.11),
+    0 0 14px rgba(230, 91, 23, 0.12);
+}
+
+.tutorial-launch-btn:hover {
+  border-color: rgba(255, 176, 112, 0.82);
+  background: rgba(141, 59, 18, 0.9);
+  box-shadow: 0 0 18px rgba(230, 91, 23, 0.24);
+}
+
+.tutorial-dialog {
+  border-color: rgba(249, 115, 36, 0.45);
+  background:
+    radial-gradient(ellipse at 82% 0%, rgba(201, 84, 27, 0.2), transparent 38%),
+    linear-gradient(145deg, #19110c, #0b0908 72%);
+  color: #f8f2ed;
+  box-shadow: 0 0 0 1px rgba(249, 115, 36, 0.1),
+    0 28px 100px rgba(0, 0, 0, 0.72),
+    0 0 48px rgba(230, 91, 23, 0.12);
+}
+
+.tutorial-kicker,
+.tutorial-message-label,
+.tutorial-step-status,
+.tutorial-step-number,
+.tutorial-step-number span {
+  color: #ff9a50;
+}
+
+.tutorial-kicker > span {
+  background: #ff8a32;
+  box-shadow: 0 0 10px rgba(255, 138, 50, 0.72);
+}
+
+.tutorial-progress > span,
+.tutorial-next-btn {
+  border-color: rgba(249, 115, 36, 0.44) !important;
+  background: linear-gradient(90deg, #e95f1d, #ffad5c);
+  box-shadow: 0 0 16px rgba(230, 91, 23, 0.18);
+}
+
+.tutorial-message {
+  border-color: rgba(249, 115, 36, 0.3);
+  border-left-color: #f97324;
+  background:
+    linear-gradient(110deg, rgba(174, 76, 25, 0.13), transparent 60%),
+    rgba(17, 12, 9, 0.9);
+}
+
+.tutorial-message-label,
+.tutorial-message strong {
+  color: #ffd0a5;
+}
+
+.tutorial-target {
+  outline-color: rgba(255, 138, 50, 0.95) !important;
+  box-shadow: 0 0 0 5px rgba(249, 115, 36, 0.13),
+    0 0 20px rgba(249, 115, 36, 0.42) !important;
+}
+
+@keyframes tutorial-target-pulse {
+  50% {
+    outline-color: rgba(255, 138, 50, 0.48);
+    box-shadow: 0 0 0 3px rgba(249, 115, 36, 0.08),
+      0 0 11px rgba(249, 115, 36, 0.22) !important;
+  }
+}
+
+html[data-theme="dark"] body[data-map-size="window"] {
+  background-image:
+    radial-gradient(ellipse at 75% 25%, rgba(235, 91, 24, 0.13), transparent 36%),
+    radial-gradient(ellipse at 18% 78%, rgba(117, 51, 22, 0.12), transparent 42%),
+    linear-gradient(145deg, #090807, #050403 62%, #110906);
+}
+
+html[data-theme="dark"] .app-navbar,
+html[data-theme="dark"] .nav-sidebar,
+html[data-theme="dark"] .sidebar-toggle-btn,
+html[data-theme="dark"] .theme-toggle-btn,
+html[data-theme="dark"] .mola-legend,
+html[data-theme="dark"] .floating-bottom-bar,
+html[data-theme="dark"] .env-weather-pill,
+html[data-theme="dark"] .layer-pill {
+  border-color: rgba(255, 145, 73, 0.2);
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.4),
+    0 0 30px rgba(220, 82, 27, 0.06),
+    inset 0 1px 0 rgba(255, 236, 220, 0.1);
+}
+
+html[data-theme="dark"] .app-navbar {
+  background: linear-gradient(145deg, rgba(20, 14, 11, 0.96), rgba(7, 7, 7, 0.96));
+}
+
+html[data-theme="dark"] .nav-sidebar {
+  background: linear-gradient(150deg, rgba(18, 13, 10, 0.96), rgba(8, 7, 6, 0.95));
+}
+
+html[data-theme="dark"] .nav-sidebar-header {
+  background: linear-gradient(180deg, rgba(224, 89, 27, 0.1), rgba(10, 8, 7, 0.06));
+  border-bottom-color: rgba(255, 145, 73, 0.16);
+}
+
+html[data-theme="dark"] .app-nav-link.active,
+html[data-theme="dark"] .mode-tab.active,
+html[data-theme="dark"] .sidebar-layer-toggle.active,
+html[data-theme="dark"] .layer-pill.active,
+html[data-theme="dark"] .step-item.active,
+html[data-theme="dark"] .globe-view-toggle[aria-pressed="true"] {
+  border-color: rgba(255, 145, 73, 0.38);
+  background: rgba(230, 91, 29, 0.18);
+  color: #ffb878;
+  box-shadow: inset 0 1px 0 rgba(255, 231, 210, 0.08),
+    0 0 18px rgba(230, 91, 29, 0.08);
+}
+
+html[data-theme="dark"] .app-nav-icon,
+html[data-theme="dark"] .mola-legend h4,
+html[data-theme="dark"] .mars-place-popup h3,
+html[data-theme="dark"] .sidebar-layer-state {
+  color: #ff9a50;
+}
+
+html[data-theme="dark"] .app-nav-link:hover,
+html[data-theme="dark"] .mode-tab:hover,
+html[data-theme="dark"] .sidebar-layer-toggle:hover,
+html[data-theme="dark"] .step-item:hover {
+  background: rgba(230, 91, 29, 0.11);
+}
+
+html[data-theme="dark"] .search-box-wrapper,
+html[data-theme="dark"] .route-endpoints,
+html[data-theme="dark"] .coordinate-entry,
+html[data-theme="dark"] .endpoint-select,
+html[data-theme="dark"] .coordinate-form input {
+  border-color: rgba(255, 145, 73, 0.18);
+  background: rgba(7, 6, 5, 0.58);
+}
+
+html[data-theme="dark"] .search-box-wrapper:focus-within,
+html[data-theme="dark"] .endpoint-select:focus,
+html[data-theme="dark"] .coordinate-form input:focus {
+  border-color: rgba(255, 145, 73, 0.55);
+  box-shadow: 0 0 0 3px rgba(230, 91, 29, 0.16);
+}
+
+html[data-theme="dark"] .icon-action-btn,
+html[data-theme="dark"] .pick-map-btn:hover,
+html[data-theme="dark"] .pick-map-btn.active {
+  border-color: rgba(255, 145, 73, 0.36);
+  background: rgba(230, 91, 29, 0.18);
+  color: #ffb878;
+}
+
+html[data-theme="dark"] .secondary-nav-btn:hover,
+html[data-theme="dark"] .sidebar-layer-toggle:hover,
+html[data-theme="dark"] .step-item:hover {
+  border-color: rgba(255, 145, 73, 0.24);
+}
+
+html[data-theme="dark"] .gmap-pin-waypoint,
+html[data-theme="dark"] .step-icon {
+  border-color: #ff9a50;
+  background: rgba(144, 58, 18, 0.72);
+  color: #ffe0c4;
+}
+
+html[data-theme="dark"] .map-fullscreen-toggle {
+  border-color: rgba(255, 145, 73, 0.48);
+  background: rgba(15, 10, 7, 0.86);
+  color: #ffe2c4;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.35),
+    0 0 22px rgba(230, 91, 29, 0.16);
+}
+
+html[data-theme="dark"] .map-fullscreen-toggle:hover {
+  border-color: rgba(255, 176, 112, 0.78);
+  background: rgba(83, 39, 17, 0.9);
+}
+
+html[data-theme="dark"] .map-fullscreen-toggle > span:first-child {
+  color: #ff9a50;
+}
+
+html[data-theme="dark"] .theme-toggle-btn {
+  border-color: rgba(255, 145, 73, 0.34);
+  background: rgba(230, 91, 29, 0.14);
+  color: #ffb878;
+}
+
+html[data-theme="dark"] .theme-toggle-btn:hover {
+  background: rgba(230, 91, 29, 0.25);
+  color: #ffe0c4;
+}
+
+html[data-theme="dark"] .primary-nav-btn,
+html[data-theme="dark"] .terrain-route-controls .primary-nav-btn {
+  border-color: rgba(255, 184, 120, 0.3);
+  background: linear-gradient(135deg, #ff9b4a, #f16b22 58%, #d94d16);
+  color: #fffaf6;
+  box-shadow: 0 8px 26px rgba(221, 78, 20, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+html[data-theme="dark"] .primary-nav-btn:hover,
+html[data-theme="dark"] .terrain-route-controls .primary-nav-btn:hover {
+  background: linear-gradient(135deg, #ffae67, #fb7b2c 58%, #e95b1b);
+}
+
+html[data-theme="dark"] .primary-nav-btn.active {
+  background: linear-gradient(135deg, #ff9b4a, #f16b22 58%, #d94d16);
+}
+
+html[data-theme="dark"] .secondary-nav-btn,
+html[data-theme="dark"] .tutorial-secondary-btn {
+  border-color: rgba(255, 145, 73, 0.18);
+  color: #f0dfd2;
+}
+
+html[data-theme="dark"] .tutorial-next-btn {
+  background: linear-gradient(135deg, #e95f1d, #ff9a50);
+  color: #fffaf6;
+}
+
+html[data-theme="dark"] .map-pick-status,
+html[data-theme="dark"] #placesStatus,
+html[data-theme="dark"] .endpoint-select optgroup,
+html[data-theme="dark"] .coordinate-entry summary {
+  color: #e8c7ad;
+}
+
+html[data-theme="dark"] .origin-dot {
+  border-color: #ff9a50;
+}
+
+html[data-theme="dark"] .app-nav-link:focus-visible,
+html[data-theme="dark"] .app-brand:focus-visible,
+html[data-theme="dark"] button:focus-visible,
+html[data-theme="dark"] select:focus-visible,
+html[data-theme="dark"] input:focus-visible,
+html[data-theme="dark"] summary:focus-visible {
+  outline-color: rgba(255, 145, 73, 0.8);
+}
+
+html[data-theme="dark"] body[data-map-size="window"] #mapFrame {
+  border-color: rgba(255, 135, 62, 0.48);
+  box-shadow: 0 0 0 1px rgba(249, 115, 36, 0.12),
+    0 28px 90px rgba(0, 0, 0, 0.48),
+    0 0 48px rgba(230, 91, 29, 0.1),
+    inset 0 1px 0 rgba(255, 236, 220, 0.14);
+}
+
+html[data-theme="dark"] #mapFrame::before {
+  border-color: rgba(255, 167, 107, 0.3);
+  box-shadow: inset 0 0 28px rgba(230, 91, 29, 0.07);
+}
+
+html[data-theme="dark"] body[data-map-size="window"] #mapFrame::after {
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 3px,
+    rgba(255, 185, 133, 0.12) 4px
+  );
+}
+
+html[data-theme="dark"] .globe-controls button {
+  border-color: rgba(255, 145, 73, 0.24);
+  color: #ffb878;
+}
+
+html[data-theme="dark"] .globe-controls button:hover {
+  border-color: rgba(255, 176, 112, 0.46);
+  background: rgba(83, 39, 17, 0.9);
+}
+
+html[data-theme="dark"] .app-nav-readout-copy span {
+  color: #d3b39a;
+}
+
+html[data-theme="dark"] .credit-list a,
+html[data-theme="dark"] .info-intro a,
+html[data-theme="dark"] .leaflet-control-zoom a,
+html[data-theme="dark"] .leaflet-control-attribution a,
+html[data-theme="dark"] .mars-place-popup a {
+  color: #ffab6b !important;
+}
+
+html[data-theme="dark"] .tutorial-dialog {
+  border-color: rgba(249, 115, 36, 0.45);
+}
+
+@media (min-width: 769px) and (max-width: 1200px) {
+  .app-navbar {
+    min-height: 68px;
+    grid-template-columns: 164px minmax(0, 1fr) 156px;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .app-brand-logo {
+    width: 160px;
+  }
+
+  .app-nav-links {
+    min-width: 0;
+    width: max-content;
+    max-width: 100%;
+    justify-content: flex-start;
+    gap: 0;
+    overflow-x: auto;
+  }
+
+  .app-nav-link {
+    gap: 0;
+    padding: 0 7px;
+    font-size: 0.68rem;
+  }
+
+  .app-nav-icon {
+    display: none;
+  }
+
+  .app-nav-actions {
+    gap: 5px;
+  }
+
+  .app-nav-readout {
+    gap: 6px;
+    max-width: 110px;
+    padding: 5px 7px;
+  }
+
+  .app-nav-readout-copy span {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-brand-logo {
+    width: 140px;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1000px) {
+  .app-navbar {
+    grid-template-columns: 148px minmax(0, 1fr) 146px;
+  }
+
+  .app-brand-logo {
+    width: 140px;
   }
 }

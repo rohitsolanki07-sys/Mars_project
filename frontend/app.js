@@ -761,11 +761,11 @@ function setAppTheme(theme, savePreference = false) {
   }
 }
 
-let savedAppTheme = 'light';
+let savedAppTheme = 'dark';
 try {
-  savedAppTheme = window.localStorage.getItem(APP_THEME_STORAGE_KEY) || 'light';
+  savedAppTheme = window.localStorage.getItem(APP_THEME_STORAGE_KEY) || 'dark';
 } catch {
-  savedAppTheme = 'light';
+  savedAppTheme = 'dark';
 }
 setAppTheme(savedAppTheme);
 themeToggleBtn?.addEventListener('click', () => {
@@ -2537,7 +2537,7 @@ async function loadMissionRoute() {
       polyline: {
         positions: routePositions,
         width: 10,
-        material: Cesium.Color.fromCssColorString('#1d4ed8').withAlpha(0.45),
+        material: Cesium.Color.fromCssColorString('#e65313').withAlpha(0.5),
         arcType: Cesium.ArcType.GEODESIC,
         clampToGround: true
       }
@@ -2546,7 +2546,7 @@ async function loadMissionRoute() {
       polyline: {
         positions: routePositions,
         width: 5,
-        material: Cesium.Color.fromCssColorString('#60a5fa'),
+        material: Cesium.Color.fromCssColorString('#ff8a32'),
         arcType: Cesium.ArcType.GEODESIC,
         clampToGround: true
       }
@@ -2559,12 +2559,12 @@ async function loadMissionRoute() {
     // Mark route endpoints and intermediate waypoints directly on the globe.
     waypoints.forEach((coord, idx) => {
       let markerText = String(idx + 1);
-      let markerColor = '#60a5fa';
+      let markerColor = '#ffc078';
       let popup;
 
       if (idx === 0) {
         markerText = 'A';
-        markerColor = '#3b82f6';
+        markerColor = '#f97324';
         popup = createMapPopup(`Origin: ${departure.name}`, [
           ['Route point', 'Selected departure point; EVA route begins here.']
         ]);
@@ -2893,7 +2893,7 @@ async function fetchNearbyScienceSites(siteData) {
   throw new Error(
     failures.length
       ? `NASA sample-site data could not be loaded (${failures.join('; ')}).`
-      : 'NASA sample-site data is available only when the Mars Navigator backend is running.'
+      : 'NASA sample-site data is available only when the AresNav backend is running.'
   );
 }
 
@@ -2941,7 +2941,7 @@ async function fetchExplorationFeatureInfo(location) {
   throw new Error(
     failures.length
       ? `NASA Mars Trek exploration info could not be loaded (${failures.join('; ')}).`
-      : 'NASA exploration info is available only when the Mars Navigator backend is running.'
+      : 'NASA exploration info is available only when the AresNav backend is running.'
   );
 }
 
@@ -3037,7 +3037,7 @@ async function fetchTerrainRoute(requestBody) {
 
   if (backendUrls.length === 0) {
     throw new Error(
-      'Could not connect to the Mars Navigator backend. Start it from the project folder with `npm start`, then retry.'
+      'Could not connect to the AresNav backend. Start it from the project folder with `npm start`, then retry.'
     );
   }
 
@@ -3080,7 +3080,7 @@ async function fetchTerrainRoute(requestBody) {
   throw new Error(
     failures.length
       ? `The terrain route service is unavailable (${failures.join('; ')}).`
-      : 'The running Mars Navigator backend does not provide terrain routing. Restart it with `npm start` and retry.'
+      : 'The running AresNav backend does not provide terrain routing. Restart it with `npm start` and retry.'
   );
 }
 

@@ -3,14 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mars Maps — AresNav EVA Navigation</title>
+  <title>AresNav — Mars EVA Navigation</title>
 
   <script>
     try {
-      if (window.localStorage.getItem('ares-nav-theme') === 'dark') {
-        document.documentElement.dataset.theme = 'dark';
-      }
-    } catch {}
+      const savedTheme = window.localStorage.getItem('ares-nav-theme');
+      document.documentElement.dataset.theme =
+        savedTheme === 'light' ? 'light' : 'dark';
+    } catch {
+      document.documentElement.dataset.theme = 'dark';
+    }
   </script>
 
   <!-- Google Fonts: Roboto -->
@@ -47,11 +49,11 @@
   <!-- Primary App Navigation -->
   <header class="app-navbar">
     <button class="app-brand" type="button" data-app-view="map" aria-label="Go to the Mars map">
-      <span class="app-brand-mark">✦</span>
-      <span class="app-brand-copy">
-        <strong>ARES NAV</strong>
-        <small>MISSION CONTROL</small>
-      </span>
+      <img
+        class="app-brand-logo"
+        src="assets/aresnav-mars-horizon-logo.png"
+        alt="AresNav Mars Horizon"
+      >
     </button>
 
     <nav class="app-nav-links" aria-label="Main navigation">
@@ -294,10 +296,10 @@
     <div class="nav-sidebar-header">
       <div class="brand-row">
         <div class="brand-logo">
-          <span class="brand-pin">📍</span>
+          <span class="brand-pin" aria-hidden="true">✦</span>
           <div>
-            <h1>Mars Maps</h1>
-            <span class="brand-subtitle">NASA Mars Trek // EVA Route Planner</span>
+            <h1>AresNav</h1>
+            <span class="brand-subtitle">MARS EVA ROUTE PLANNER</span>
           </div>
         </div>
         <span id="missionStatus" class="status-badge">STANDBY</span>
@@ -652,7 +654,7 @@
 
       <section class="section-block info-section" id="creditsSection" hidden aria-labelledby="creditsTitle">
         <div class="section-title" id="creditsTitle">DATA &amp; SOFTWARE CREDITS</div>
-        <p class="info-intro">Mars Navigator uses public Mars mapping and science resources. Source data remains the property of its providers; their use does not imply endorsement.</p>
+        <p class="info-intro">AresNav uses public Mars mapping and science resources. Source data remains the property of its providers; their use does not imply endorsement.</p>
         <h2>NASA / JPL Mars Trek</h2>
         <p class="info-intro"><strong>22 live map/data service layers</strong> plus <strong>1 site-image preview</strong> are integrated from NASA/JPL Mars Trek. These are data sources, not 23 NASA software tools.</p>
         <ul class="credit-list">
