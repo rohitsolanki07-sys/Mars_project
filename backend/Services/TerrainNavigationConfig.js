@@ -12,9 +12,9 @@ module.exports = Object.freeze({
   }),
   terrain: Object.freeze({
     slopeDegrees: Object.freeze({
-      preferred: 5,
-      caution: 10,
-      highRisk: 15
+      preferred: 10,
+      caution: 20,
+      highRisk: 25
     }),
     roughnessMeters: Object.freeze({
       preferred: 2,
@@ -42,15 +42,7 @@ module.exports = Object.freeze({
     maximumBufferMeters: 5000
   }),
   costWeights: Object.freeze({
-    slope: 0.4,
-    roughness: 0.3,
-    elevationChange: 0.1,
-    hazard: 0.2,
     thermalTransition: 0.15
-  }),
-  geologyPreferences: Object.freeze({
-    minimumCostAdjustment: -0.15,
-    maximumCostAdjustment: 0.15
   }),
   unknownElevationPolicy: 'block',
   nasaMola: Object.freeze({

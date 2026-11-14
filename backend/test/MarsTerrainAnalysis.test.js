@@ -47,7 +47,7 @@ function countPathLength(path, resolutionMeters) {
   return total;
 }
 
-test('flat terrain returns the shortest 8-directional route and usable statistics', () => {
+test('flat terrain returns the shortest any-angle route and usable statistics', () => {
   const grid = flatGrid();
   grid.start = gridCellToCoordinate(grid, 4, 0);
   grid.destination = gridCellToCoordinate(grid, 4, 8);
@@ -61,17 +61,18 @@ test('flat terrain returns the shortest 8-directional route and usable statistic
   assert.equal(result.confidence.level, 'LOW');
 });
 
-test('slope uses Mars ground distances and classifies steep cells as restricted', () => {
+test('slopes above 25 degrees are impassable using Mars ground distances', () => {
   const grid = flatGrid(7, 7, 1000);
   for (let row = 0; row < grid.rows; row += 1) {
     for (let column = 0; column < grid.columns; column += 1) {
-      grid.elevations[row * grid.columns + column] = column * 400;
+      grid.elevations[row * grid.columns + column] = column * 600;
     }
   }
   const cells = analyzeTerrain(grid);
   const center = cells[3 * grid.columns + 3];
-  assert.ok(center.slopeDegrees > 15);
+  assert.ok(center.slopeDegrees > 25);
   assert.equal(center.state, TERRAIN_STATES.RESTRICTED);
+  assert.equal(center.slopePenalty, Infinity);
 });
 
 test('a smooth incline is classified by slope, not mistaken for roughness', () => {
@@ -88,16 +89,43 @@ test('a smooth incline is classified by slope, not mistaken for roughness', () =
   assert.ok(center.slopeDegrees > 5 && center.slopeDegrees < 10);
   assert.ok(center.roughnessMeters < 0.01);
   assert.ok(center.maxElevationChangeMeters < 0.01);
-  assert.equal(center.state, TERRAIN_STATES.CAUTION);
+  assert.equal(center.state, TERRAIN_STATES.SAFE);
+  assert.equal(center.slopePenalty, 1);
   assert.equal(center.blockedByCrater, false);
 });
 
-test('local roughness identifies high-relief cells without inventing obstacle data', () => {
-  const grid = flatGrid(7, 7, 1000);
-  grid.elevations[3 * grid.columns + 3] = 100;
+test('slope penalties follow the safe, moderate, and critical bands', () => {
+  for (const [degrees, expectedPenalty] of [
+    [8, 1],
+    [15, 5],
+    [22, 20]
+  ]) {
+    const grid = flatGrid(7, 7, 1000);
+    const risePerCell = Math.tan(degrees * Math.PI / 180) * grid.resolutionMeters;
+    for (let row = 0; row < grid.rows; row += 1) {
+      for (let column = 0; column < grid.columns; column += 1) {
+        grid.elevations[row * grid.columns + column] = column * risePerCell;
+      }
+    }
+
+    const center = analyzeTerrain(grid)[3 * grid.columns + 3];
+    assert.equal(center.slopePenalty, expectedPenalty);
+  }
+});
+
+test('high roughness adds cost without making otherwise traversable ground impassable', () => {
+  const grid = flatGrid(7, 7, 500);
+  for (let row = 0; row < grid.rows; row += 1) {
+    for (let column = 0; column < grid.columns; column += 1) {
+      grid.elevations[row * grid.columns + column] =
+        (row + column) % 2 === 0 ? 0 : 24;
+    }
+  }
   const center = analyzeTerrain(grid)[3 * grid.columns + 3];
   assert.ok(center.roughnessMeters > 10);
-  assert.equal(center.state, TERRAIN_STATES.RESTRICTED);
+  assert.equal(center.roughnessPenalty, 10);
+  assert.equal(center.costScore, 12);
+  assert.equal(center.state, TERRAIN_STATES.HIGH_RISK);
 });
 
 test('crater-like closed depressions are blocked and routes detour around them', () => {
@@ -207,7 +235,7 @@ test('rejects an exact route endpoint inside a hazard even when its nearest cell
   );
 });
 
-test('A* takes a longer safe detour around a restricted hazard', () => {
+test('Theta* takes a longer safe detour around a restricted hazard', () => {
   const grid = flatGrid(11, 11, 500);
   grid.startCell = { row: 5, column: 1 };
   grid.destinationCell = { row: 5, column: 9 };
@@ -224,7 +252,7 @@ test('A* takes a longer safe detour around a restricted hazard', () => {
   assert.ok(result.routeCells.every((cell) => cell.state !== TERRAIN_STATES.RESTRICTED));
 });
 
-test('A* routes around polygon hazards', () => {
+test('Theta* routes around polygon hazards', () => {
   const grid = flatGrid(11, 11, 500);
   grid.startCell = { row: 5, column: 1 };
   grid.destinationCell = { row: 5, column: 9 };
@@ -260,7 +288,6 @@ test('USGS hazard-class geology polygons are blocked and detoured around', () =>
   const result = calculateRoute(grid, [], {}, {
     geologyZones: [{
       category: 'hazard',
-      preference: 0,
       polygon: corners
     }]
   });
@@ -270,7 +297,7 @@ test('USGS hazard-class geology polygons are blocked and detoured around', () =>
   assert.equal(result.geologyZonesConsidered.hazard, 1);
 });
 
-test('science geology zones are reported and affect the route cost', () => {
+test('science geology zones are reported in route results', () => {
   const grid = flatGrid(9, 9, 500);
   grid.startCell = { row: 4, column: 0 };
   grid.destinationCell = { row: 4, column: 8 };
@@ -286,13 +313,43 @@ test('science geology zones are reported and affect the route cost', () => {
   const result = calculateRoute(grid, [], {}, {
     geologyZones: [{
       category: 'water_ice_target',
-      preference: -0.15,
       polygon: corners
     }]
   });
 
   assert.ok(result.geologyZoneCounts.water_ice_target > 0);
-  assert.ok(result.routeCells.some((cell) => cell.geologyPenalty === -0.15));
+  assert.ok(result.routeCells.every((cell) => cell.geologyPenalty === 1));
+});
+
+test('highland geology costs 3 and mapped dunes remain impassable', () => {
+  const grid = flatGrid(7, 7, 500);
+  const polygon = [
+    gridCellToCoordinate(grid, 2, 2),
+    gridCellToCoordinate(grid, 2, 4),
+    gridCellToCoordinate(grid, 4, 4),
+    gridCellToCoordinate(grid, 4, 2)
+  ];
+  const highland = analyzeTerrain(grid, [], [{
+    category: 'crater_ejecta_highland',
+    polygon
+  }])[3 * grid.columns + 3];
+  assert.equal(highland.geologyPenalty, 3);
+  assert.equal(highland.costScore, 5);
+
+  const dunes = analyzeTerrain(grid, [], [{
+    category: 'polar_dunes',
+    polygon
+  }])[3 * grid.columns + 3];
+  assert.equal(dunes.state, TERRAIN_STATES.RESTRICTED);
+
+  grid.start = gridCellToCoordinate(grid, 3, 3);
+  grid.destination = gridCellToCoordinate(grid, 3, 6);
+  assert.throws(
+    () => calculateRoute(grid, [], {}, {
+      geologyZones: [{ category: 'polar_dunes', polygon }]
+    }),
+    /starting coordinate is inside a restricted hazard/
+  );
 });
 
 test('TES thermal-color transitions contribute to route effort reporting', () => {
@@ -449,7 +506,7 @@ test('diagonal movement cannot cut a corner between blocked cells', () => {
   grid.destinationCell = { row: 2, column: 2 };
   const cells = Array.from({ length: 9 }, () => ({
     state: TERRAIN_STATES.SAFE,
-    normalizedPenalty: 0,
+    costScore: 3,
     hazardPenalty: 0,
     blockedByHazard: false
   }));
@@ -505,76 +562,30 @@ test('global route grids keep sampled latitudes within the valid polar range', (
   }
 });
 
-test('A* path cost matches Dijkstra on the same small weighted grid', () => {
-  const grid = flatGrid(5, 6);
-  grid.startCell = { row: 2, column: 0 };
-  grid.destinationCell = { row: 2, column: 5 };
-  const cells = Array.from({ length: 30 }, (_, index) => ({
-    state: TERRAIN_STATES.SAFE,
-    normalizedPenalty: index % 6 === 2 ? 0.8 : 0.05,
-    hazardPenalty: 0,
-    blockedByHazard: false
-  }));
+test('Theta* returns a direct any-angle path across clear terrain', () => {
+  const grid = flatGrid(7, 8);
+  grid.startCell = { row: 1, column: 0 };
+  grid.destinationCell = { row: 5, column: 7 };
+  const cells = analyzeTerrain(grid);
   const path = findLowestCostPath(grid, cells);
-  const pathCost = path.slice(1).reduce((sum, cell, index) => {
-    const previous = path[index];
-    const currentIndex = cell.row * grid.columns + cell.column;
-    const previousIndex = previous.row * grid.columns + previous.column;
-    const distance = Math.hypot(
-      (cell.column - previous.column) * grid.resolutionMeters,
-      (cell.row - previous.row) * grid.resolutionMeters
-    );
-    return sum + distance * (
-      1 + (cells[currentIndex].normalizedPenalty + cells[previousIndex].normalizedPenalty) / 2
-    );
-  }, 0);
 
-  const distances = new Array(30).fill(Infinity);
-  const visited = new Set();
-  const startIndex = 2 * grid.columns;
-  const targetIndex = 2 * grid.columns + 5;
-  distances[startIndex] = 0;
-  while (visited.size < distances.length) {
-    let currentIndex = -1;
-    for (let index = 0; index < distances.length; index += 1) {
-      if (!visited.has(index) &&
-          (currentIndex === -1 || distances[index] < distances[currentIndex])) {
-        currentIndex = index;
-      }
-    }
-    if (currentIndex === -1 || !Number.isFinite(distances[currentIndex])) break;
-    if (currentIndex === targetIndex) break;
-    visited.add(currentIndex);
-    const row = Math.floor(currentIndex / grid.columns);
-    const column = currentIndex % grid.columns;
-    for (let rowOffset = -1; rowOffset <= 1; rowOffset += 1) {
-      for (let columnOffset = -1; columnOffset <= 1; columnOffset += 1) {
-        if (rowOffset === 0 && columnOffset === 0) continue;
-        const nextRow = row + rowOffset;
-        const nextColumn = column + columnOffset;
-        if (nextRow < 0 || nextRow >= grid.rows ||
-            nextColumn < 0 || nextColumn >= grid.columns) continue;
-        if (rowOffset && columnOffset) {
-          if (
-            cells[row * grid.columns + nextColumn].state !== TERRAIN_STATES.SAFE ||
-            cells[nextRow * grid.columns + column].state !== TERRAIN_STATES.SAFE
-          ) continue;
-        }
-        const nextIndex = nextRow * grid.columns + nextColumn;
-        if (cells[nextIndex].state !== TERRAIN_STATES.SAFE) continue;
-        const distance = Math.hypot(
-          rowOffset * grid.resolutionMeters,
-          columnOffset * grid.resolutionMeters
-        );
-        const edgeCost = distance * (
-          1 + (cells[currentIndex].normalizedPenalty + cells[nextIndex].normalizedPenalty) / 2
-        );
-        distances[nextIndex] = Math.min(
-          distances[nextIndex],
-          distances[currentIndex] + edgeCost
-        );
-      }
-    }
+  assert.equal(path.length, 2);
+  assert.ok(Math.abs(
+    countPathLength(path, grid.resolutionMeters) -
+      Math.hypot(7, 4) * grid.resolutionMeters
+  ) < 0.01);
+});
+
+test('Theta* detours around a high-cost corridor when the detour is cheaper', () => {
+  const grid = flatGrid(7, 7);
+  grid.startCell = { row: 3, column: 0 };
+  grid.destinationCell = { row: 3, column: 6 };
+  const cells = analyzeTerrain(grid);
+  for (let column = 1; column < 6; column += 1) {
+    cells[3 * grid.columns + column].costScore = 12;
   }
-  assert.equal(pathCost, distances[targetIndex]);
+
+  const path = findLowestCostPath(grid, cells);
+
+  assert.ok(path.some((cell) => cell.row !== 3));
 });

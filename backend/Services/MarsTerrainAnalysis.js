@@ -458,9 +458,11 @@ function analyzeTerrain(grid, hazards = [], geologyZones = []) {
     roughnessMeters: null,
     maxElevationChangeMeters: null,
     state: TERRAIN_STATES.UNKNOWN,
-    normalizedPenalty: 0,
+    slopePenalty: Infinity,
+    roughnessPenalty: Infinity,
+    costScore: Infinity,
     hazardPenalty: 0,
-    geologyPenalty: 0,
+    geologyPenalty: 1,
     geologyCategories: [],
     blockedByHazard: false,
     blockedByCrater: false,
@@ -553,9 +555,12 @@ function analyzeTerrain(grid, hazards = [], geologyZones = []) {
         roughnessMeters,
         maxElevationChangeMeters,
         state: TERRAIN_STATES.SAFE,
-        normalizedPenalty: 0,
+        slopePenalty: 1,
+        roughnessPenalty:
+          roughnessMeters > roughnessThresholds.highRisk ? 10 : 1,
+        costScore: 0,
         hazardPenalty: 0,
-        geologyPenalty: 0,
+        geologyPenalty: 1,
         geologyCategories: [],
         blockedByHazard: false,
         blockedByCrater: false,
@@ -572,9 +577,16 @@ function analyzeTerrain(grid, hazards = [], geologyZones = []) {
     const slope = cell.slopeDegrees;
     const roughness = cell.roughnessMeters;
     const elevationChange = cell.maxElevationChangeMeters;
+    cell.slopePenalty =
+      slope <= terrainConfig.slopeDegrees.preferred
+        ? 1
+        : slope <= terrainConfig.slopeDegrees.caution
+          ? 5
+          : slope <= terrainConfig.slopeDegrees.highRisk
+            ? 20
+            : Infinity;
     if (
       slope > terrainConfig.slopeDegrees.highRisk ||
-      roughness > roughnessThresholds.highRisk ||
       elevationChange > elevationChangeThresholds.highRisk ||
       cell.blockedByHazard
     ) {
@@ -593,19 +605,8 @@ function analyzeTerrain(grid, hazards = [], geologyZones = []) {
       cell.state = TERRAIN_STATES.CAUTION;
     }
 
-    const weights = CONFIG.costWeights;
-    cell.normalizedPenalty =
-      weights.slope *
-        Math.min(slope / terrainConfig.slopeDegrees.highRisk, 1) +
-      weights.roughness *
-        Math.min(roughness / roughnessThresholds.highRisk, 1) +
-      weights.elevationChange *
-        Math.min(
-          elevationChange / elevationChangeThresholds.highRisk,
-          1
-        ) +
-      weights.hazard * cell.hazardPenalty +
-      cell.geologyPenalty;
+    cell.costScore =
+      cell.slopePenalty + cell.geologyPenalty + cell.roughnessPenalty;
   });
 
   applyCraterDepressionMask(grid, cellAnalysis);
@@ -625,21 +626,18 @@ function applyGeologyZones(grid, cells, zones) {
     ) {
       throw new TypeError('Each geology zone must include a polygon with at least three points.');
     }
-    const preference = zone.preference ?? 0;
-    if (
-      !Number.isFinite(preference) ||
-      preference < CONFIG.geologyPreferences.minimumCostAdjustment ||
-      preference > CONFIG.geologyPreferences.maximumCostAdjustment
-    ) {
-      throw new RangeError('Geology-zone cost adjustments are outside the configured range.');
-    }
     const polygon = zone.polygon.map((coordinate) => {
       if (!isValidCoordinate(coordinate)) {
         throw new TypeError('Geology-zone polygon coordinates must be valid.');
       }
       return toLocalPosition(grid, coordinate);
     });
-    const isHazard = zone.category === 'hazard';
+    const category = String(zone.category || '').toLowerCase();
+    const isHazard = isImpassableGeologyCategory(category);
+    const geologyPenalty =
+      category.includes('ejecta') || category.includes('highland')
+        ? 3
+        : 1;
 
     for (let row = 0; row < grid.rows; row += 1) {
       for (let column = 0; column < grid.columns; column += 1) {
@@ -656,7 +654,10 @@ function applyGeologyZones(grid, cells, zones) {
           cell.hazardPenalty = 1;
           cell.state = TERRAIN_STATES.RESTRICTED;
         } else {
-          cell.geologyPenalty = Math.min(cell.geologyPenalty, preference);
+          cell.geologyPenalty = Math.max(
+            cell.geologyPenalty,
+            geologyPenalty
+          );
         }
         if (zone.category && !cell.geologyCategories.includes(zone.category)) {
           cell.geologyCategories.push(zone.category);
@@ -664,6 +665,15 @@ function applyGeologyZones(grid, cells, zones) {
       }
     }
   }
+}
+
+function isImpassableGeologyCategory(category) {
+  const normalizedCategory = String(category || '').toLowerCase();
+  return (
+    normalizedCategory === 'hazard' ||
+    normalizedCategory.includes('dune') ||
+    normalizedCategory.includes('bedform')
+  );
 }
 
 function thermalTransitionPenalty(colors, fromIndex, toIndex) {
@@ -794,7 +804,12 @@ function coordinateInsideRestrictedHazard(
   });
   if (insideHazard) return true;
   return geologyZones.some((zone) => {
-    if (zone.category !== 'hazard' || !Array.isArray(zone.polygon)) return false;
+    if (
+      !isImpassableGeologyCategory(zone.category) ||
+      !Array.isArray(zone.polygon)
+    ) {
+      return false;
+    }
     return pointInPolygon(
       local,
       zone.polygon.map((point) => toLocalPosition(grid, point))
@@ -954,10 +969,11 @@ function findLowestCostPath(grid, cells, thermalColors) {
   parent.fill(-1);
   const closed = new Uint8Array(totalCells);
   const open = new MinHeap();
+  const minimumCostScore = minimumCellCostScore(cells);
   gScore[startIndex] = 0;
   open.push({
     index: startIndex,
-    priority: heuristic(grid, start, destination)
+    priority: heuristic(grid, start, destination) * minimumCostScore
   });
   const directions = [
     [-1, -1],
@@ -1004,27 +1020,46 @@ function findLowestCostPath(grid, cells, thermalColors) {
         }
       }
 
-      const distance = Math.hypot(
-        columnOffset * grid.resolutionMeters,
-        rowOffset * grid.resolutionMeters
-      );
-      const nextCell = cells[nextIndex];
-      const penalty =
-        (cells[current.index].normalizedPenalty +
-          nextCell.normalizedPenalty) /
-        2 +
-        CONFIG.costWeights.thermalTransition *
-          thermalTransitionPenalty(thermalColors, current.index, nextIndex);
-      const tentativeScore =
-        gScore[current.index] +
-        distance * Math.max(0.5, 1 + penalty);
-      if (tentativeScore >= gScore[nextIndex]) continue;
-      parent[nextIndex] = current.index;
-      gScore[nextIndex] = tentativeScore;
+      const currentPosition = {
+        row,
+        column
+      };
       const next = { row: nextRow, column: nextColumn };
+      let candidateParent = current.index;
+      let tentativeScore =
+        gScore[current.index] +
+        segmentTraversalCost(
+          grid,
+          cells,
+          currentPosition,
+          next,
+          thermalColors
+        ).cost;
+      const currentParentIndex = parent[current.index];
+      if (currentParentIndex !== -1) {
+        const currentParent = {
+          row: Math.floor(currentParentIndex / grid.columns),
+          column: currentParentIndex % grid.columns
+        };
+        const shortcutCost = segmentTraversalCost(
+          grid,
+          cells,
+          currentParent,
+          next,
+          thermalColors
+        ).cost;
+        if (Number.isFinite(shortcutCost) &&
+            gScore[currentParentIndex] + shortcutCost < tentativeScore) {
+          candidateParent = currentParentIndex;
+          tentativeScore = gScore[currentParentIndex] + shortcutCost;
+        }
+      }
+      if (tentativeScore >= gScore[nextIndex]) continue;
+      parent[nextIndex] = candidateParent;
+      gScore[nextIndex] = tentativeScore;
       open.push({
         index: nextIndex,
-        priority: tentativeScore + heuristic(grid, next, destination)
+        priority: tentativeScore + heuristic(grid, next, destination) * minimumCostScore
       });
     }
   }
@@ -1032,12 +1067,118 @@ function findLowestCostPath(grid, cells, thermalColors) {
   throw new Error('No safe route exists through the available terrain grid.');
 }
 
+function minimumCellCostScore(cells) {
+  let minimum = Infinity;
+  for (const cell of cells) {
+    if (isCellTraversable(cell)) minimum = Math.min(minimum, cell.costScore);
+  }
+  return Number.isFinite(minimum) ? minimum : 0;
+}
+
+function segmentTraversalCost(grid, cells, from, to, thermalColors) {
+  const deltaColumn = to.column - from.column;
+  const deltaRow = to.row - from.row;
+  const stepColumn = Math.sign(deltaColumn);
+  const stepRow = Math.sign(deltaRow);
+  const absoluteColumn = Math.abs(deltaColumn);
+  const absoluteRow = Math.abs(deltaRow);
+  const lineDistance =
+    Math.hypot(deltaColumn, deltaRow) * grid.resolutionMeters;
+  if (lineDistance === 0) {
+    return {
+      cost: 0,
+      terrainCost: 0,
+      thermalTransitionScore: 0,
+      cellIndices: [from.row * grid.columns + from.column]
+    };
+  }
+
+  let row = from.row;
+  let column = from.column;
+  let traversedDistance = 0;
+  let weightedTerrainScore = 0;
+  let weightedThermalScore = 0;
+  let thermalTransitionScore = 0;
+  let previousIndex = row * grid.columns + column;
+  const cellIndices = [previousIndex];
+  while (row !== to.row || column !== to.column) {
+    const columnProgress =
+      absoluteColumn === 0
+        ? Infinity
+        : (1 + 2 * Math.abs(column - from.column)) * absoluteRow;
+    const rowProgress =
+      absoluteRow === 0
+        ? Infinity
+        : (1 + 2 * Math.abs(row - from.row)) * absoluteColumn;
+    const previousRow = row;
+    const previousColumn = column;
+    if (columnProgress === rowProgress) {
+      const sideColumnIndex = row * grid.columns + column + stepColumn;
+      const sideRowIndex = (row + stepRow) * grid.columns + column;
+      if (
+        !isCellTraversable(cells[sideColumnIndex]) ||
+        !isCellTraversable(cells[sideRowIndex])
+      ) {
+        return { cost: Infinity, cellIndices: [] };
+      }
+      column += stepColumn;
+      row += stepRow;
+    } else if (columnProgress < rowProgress) {
+      column += stepColumn;
+    } else {
+      row += stepRow;
+    }
+
+    if (
+      row < 0 ||
+      row >= grid.rows ||
+      column < 0 ||
+      column >= grid.columns
+    ) {
+      return { cost: Infinity, cellIndices: [] };
+    }
+    const nextIndex = row * grid.columns + column;
+    if (!isCellTraversable(cells[nextIndex])) {
+      return { cost: Infinity, cellIndices: [] };
+    }
+    const stepDistance =
+      Math.hypot(column - previousColumn, row - previousRow) *
+      grid.resolutionMeters;
+    weightedTerrainScore +=
+      ((cells[previousIndex].costScore + cells[nextIndex].costScore) / 2) *
+      stepDistance;
+    const thermalPenalty = thermalTransitionPenalty(
+      thermalColors,
+      previousIndex,
+      nextIndex
+    );
+    weightedThermalScore += thermalPenalty * stepDistance;
+    thermalTransitionScore += thermalPenalty;
+    traversedDistance += stepDistance;
+    previousIndex = nextIndex;
+    cellIndices.push(nextIndex);
+  }
+
+  const terrainCost =
+    lineDistance * (weightedTerrainScore / traversedDistance);
+  const thermalCost =
+    lineDistance *
+    CONFIG.costWeights.thermalTransition *
+    (weightedThermalScore / traversedDistance);
+  return {
+    cost: terrainCost + thermalCost,
+    terrainCost,
+    thermalTransitionScore,
+    cellIndices
+  };
+}
+
 function heuristic(grid, from, to) {
   return (
     Math.hypot(
       (to.column - from.column) * grid.resolutionMeters,
       (to.row - from.row) * grid.resolutionMeters
-    ) * 0.5 || 0
+    ) || 0
   );
 }
 
@@ -1184,44 +1325,45 @@ function calculateRoute(
   let accumulatedThermalTransitionScore = 0;
   let elevationGainMeters = 0;
   let elevationLossMeters = 0;
-  const routeCells = path.map(
-    ({ row, column }) => cells[row * grid.columns + column]
-  );
+  const traversedCellIndices = [];
   for (let index = 1; index < path.length; index += 1) {
     const previous = path[index - 1];
     const current = path[index];
-    const distance = Math.hypot(
-      (current.column - previous.column) * grid.resolutionMeters,
-      (current.row - previous.row) * grid.resolutionMeters
+    const segmentCost = segmentTraversalCost(
+      grid,
+      cells,
+      previous,
+      current,
+      thermalColors
     );
-    const previousCell =
-      cells[previous.row * grid.columns + previous.column];
-    const currentCell = cells[current.row * grid.columns + current.column];
-    const terrainPenalty =
-      (previousCell.normalizedPenalty + currentCell.normalizedPenalty) / 2;
-    const thermalPenalty = thermalTransitionPenalty(
-      thermalColors,
-      previous.row * grid.columns + previous.column,
-      current.row * grid.columns + current.column
-    );
-    accumulatedThermalTransitionScore += thermalPenalty;
-    accumulatedTerrainCost += distance * (1 + terrainPenalty);
-    accumulatedTerrainCost +=
-      distance * CONFIG.costWeights.thermalTransition * thermalPenalty;
-    const elevationChange =
-      getElevation(grid, current.row, current.column) -
-      getElevation(grid, previous.row, previous.column);
-    if (elevationChange > 0) elevationGainMeters += elevationChange;
-    else elevationLossMeters -= elevationChange;
+    accumulatedThermalTransitionScore +=
+      segmentCost.thermalTransitionScore;
+    accumulatedTerrainCost += segmentCost.cost;
+    if (traversedCellIndices.length === 0) {
+      traversedCellIndices.push(segmentCost.cellIndices[0]);
+    }
+    traversedCellIndices.push(...segmentCost.cellIndices.slice(1));
+    for (let cellIndex = 1; cellIndex < segmentCost.cellIndices.length; cellIndex += 1) {
+      const previousIndex = segmentCost.cellIndices[cellIndex - 1];
+      const currentIndex = segmentCost.cellIndices[cellIndex];
+      const elevationChange =
+        grid.elevations[currentIndex] - grid.elevations[previousIndex];
+      if (elevationChange > 0) elevationGainMeters += elevationChange;
+      else elevationLossMeters -= elevationChange;
+    }
   }
+  if (traversedCellIndices.length === 0) {
+    traversedCellIndices.push(path[0].row * grid.columns + path[0].column);
+  }
+  const routeCells = traversedCellIndices.map((index) => cells[index]);
   const startCell = cells[path[0].row * grid.columns + path[0].column];
   const destinationCell =
     cells[path.at(-1).row * grid.columns + path.at(-1).column];
   accumulatedTerrainCost +=
     surfaceDistanceMeters(grid.start, gridCoordinates[0]) *
-      (1 + startCell.normalizedPenalty) +
+      startCell.costScore +
     surfaceDistanceMeters(gridCoordinates.at(-1), grid.destination) *
-      (1 + destinationCell.normalizedPenalty);
+      destinationCell.costScore;
 
   const knownRouteCells = routeCells.filter(
     (cell) => cell.state !== TERRAIN_STATES.UNKNOWN
@@ -1271,11 +1413,15 @@ function calculateRoute(
       destinationMeters: destination.distance
     },
     routeCoordinates: coordinates,
-    routeCells: path.map(({ row, column }) => ({
-      ...gridCellToCoordinate(grid, row, column),
-      elevationMeters: getElevation(grid, row, column),
-      ...cells[row * grid.columns + column]
-    })),
+    routeCells: traversedCellIndices.map((index) => {
+      const row = Math.floor(index / grid.columns);
+      const column = index % grid.columns;
+      return {
+        ...gridCellToCoordinate(grid, row, column),
+        elevationMeters: getElevation(grid, row, column),
+        ...cells[index]
+      };
+    }),
     totalDistanceMeters: routeDistanceMeters,
     totalDistanceKilometers: routeDistanceMeters / 1000,
     accumulatedTerrainCostMeters: accumulatedTerrainCost,

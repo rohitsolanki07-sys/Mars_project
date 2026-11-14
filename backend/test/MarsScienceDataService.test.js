@@ -8,19 +8,29 @@ const {
   loadVisitableSites
 } = require('../Services/MarsScienceDataService');
 
-test('classifies USGS global geology into the four requested route categories', () => {
+test('classifies USGS global geology into route-cost categories', () => {
   assert.equal(classifyGeologyUnit('Amazonian apron unit').category, 'water_ice_target');
   assert.equal(classifyGeologyUnit('Amazonian outflow channel unit').category, 'water_ice_target');
   assert.equal(classifyGeologyUnit('Late Hesperian lowland unit').category, 'preferred_transit');
   assert.equal(classifyGeologyUnit('Early Amazonian basin unit').category, 'preferred_transit');
   assert.equal(classifyGeologyUnit('Late Amazonian polar dunes unit').category, 'hazard');
-  assert.equal(classifyGeologyUnit('Noachian highland massif unit').category, 'hazard');
+  assert.equal(
+    classifyGeologyUnit('Noachian highland massif unit').category,
+    'crater_ejecta_highland'
+  );
+  assert.equal(
+    classifyGeologyUnit('Noachian crater ejecta unit').category,
+    'crater_ejecta_highland'
+  );
   assert.equal(classifyGeologyUnit('Noachian volcanic edifice unit').category, 'hazard');
   assert.equal(
     classifyGeologyUnit('Amazonian volcanic unit').category,
     'volcanic_habitat_candidate'
   );
-  assert.equal(classifyGeologyUnit('Noachian highland unit'), null);
+  assert.equal(
+    classifyGeologyUnit('Noachian highland unit').category,
+    'crater_ejecta_highland'
+  );
 });
 
 test('loads mapped geology polygons as costed route zones', async () => {
@@ -58,7 +68,6 @@ test('loads mapped geology polygons as costed route zones', async () => {
     const zones = await loadGeologyZones(grid);
     assert.equal(zones.length, 1);
     assert.equal(zones[0].category, 'water_ice_target');
-    assert.equal(zones[0].preference, -0.15);
     assert.equal(zones[0].polygon.length, 5);
   } finally {
     global.fetch = originalFetch;

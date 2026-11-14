@@ -157,9 +157,18 @@ roughly 200-metre native horizontal spacing near the equator; actual ground
 spacing varies with latitude. Choosing a finer planning grid does not add
 detail to the source elevation data.
 
-The backend analyzes slope, local elevation variation, and known hazard
-buffers, and DEM-detected closed depressions, then uses A* search with
-eight-direction movement. Crater-like depressions are detected by comparing
+The backend analyzes slope, local elevation variation, mapped geology zones,
+known hazard buffers, and DEM-detected closed depressions, then uses Theta*
+search for any-angle paths. Each sampled cell's terrain score adds slope cost
+(1 from 0 through 10 degrees, 5 above 10 through 20, 20 above 20 through 25, and
+impassable above 25), geology cost (1 for mapped lowlands/basins, 3 for
+highlands/ejecta, and impassable for mapped dunes), and roughness cost (1 at or
+below the high-roughness threshold or 10 above it; the default threshold is 10
+metres and scales with grid spacing). Mapped geology categories are a regional-scale
+text classification; they do not confirm surface material or stability.
+Thermal-color transitions remain a separate effort adjustment. Any-angle
+segments are accepted only when their sampled grid traversal avoids unknown
+and restricted cells. Crater-like depressions are detected by comparing
 slope-adjusted elevations in six sampled annuli against the center elevation;
 at least seven of eight surrounding sectors must show a lower center. Detected
 basins are blocked with a one-cell safety buffer. The configured minimum
@@ -169,8 +178,8 @@ the greater of 20 metres or 4% of that spacing. Local relief is measured after
 removing the neighborhood's estimated planar slope, so a smooth incline is
 evaluated as slope rather than incorrectly treated as roughness.
 Roughness and elevation-change thresholds scale with planning-cell spacing to
-avoid applying metre-scale limits to coarse cells on long routes. Steep slopes,
-restricted hazards, detected depressions, and unknown/NoData cells remain
+avoid applying metre-scale limits to coarse cells on long routes. Slopes above
+25 degrees, restricted hazards, detected depressions, and unknown/NoData cells remain
 blocked, and diagonal moves cannot cut between blocked cells. Depression
 detection is a conservative DEM heuristic, not a crater catalogue; small,
 shallow, undersampled, or poorly resolved crater interiors may be missed, so
@@ -184,8 +193,8 @@ human-traverse standards or NASA-endorsed route recommendations.
 Grid spacing can be selected from 250 to 2,000 metres. To keep external requests
 bounded, the grid is capped at 55 rows by 55 columns; longer routes increase
 their spacing to fit. Elevation requests are batched, with a bounded in-memory
-sample cache. The grid bounds, terrain thresholds, hazard buffer, cost weights,
-NASA service URL, and cache limit are documented together in
+sample cache. The grid bounds, terrain thresholds, hazard buffer, thermal
+effort weight, NASA service URL, and cache limit are documented together in
 `backend/Services/TerrainNavigationConfig.js`.
 
 If a selected endpoint lands on unknown or restricted terrain, the planner

@@ -164,17 +164,23 @@ function getOuterRings(geometry) {
 
 function classifyGeologyUnit(description) {
   const unit = String(description || '').toLowerCase();
-  if (unit.includes('polar dunes') || unit.includes('edifice') || unit.includes('massif')) {
-    return { category: 'hazard', preference: 0 };
+  if (unit.includes('dune') || unit.includes('bedform')) {
+    return { category: 'hazard' };
+  }
+  if (unit.includes('crater ejecta') || unit.includes('highland')) {
+    return { category: 'crater_ejecta_highland' };
+  }
+  if (unit.includes('edifice') || unit.includes('massif')) {
+    return { category: 'hazard' };
   }
   if (unit.includes('apron') || unit.includes('outflow')) {
-    return { category: 'water_ice_target', preference: -0.15 };
+    return { category: 'water_ice_target' };
   }
   if (unit.includes('lowland') || unit.includes('basin')) {
-    return { category: 'preferred_transit', preference: -0.1 };
+    return { category: 'preferred_transit' };
   }
   if (unit.includes('amazonian') && unit.includes('volcanic')) {
-    return { category: 'volcanic_habitat_candidate', preference: -0.15 };
+    return { category: 'volcanic_habitat_candidate' };
   }
   return null;
 }
@@ -190,7 +196,6 @@ function createGeologyZones(features) {
       id: `usgs-geology-${attributes.OBJECTID ?? attributes.FID ?? 'feature'}-${index}`,
       name: description,
       category: classification.category,
-      preference: classification.preference,
       polygon
     }));
   });
