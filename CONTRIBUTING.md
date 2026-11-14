@@ -162,9 +162,13 @@ known hazard buffers, and DEM-detected closed depressions, then uses Theta*
 search for any-angle paths. Each sampled cell's terrain score adds slope cost
 (1 from 0 through 10 degrees, 5 above 10 through 20, 20 above 20 through 25, and
 impassable above 25), geology cost (1 for mapped lowlands/basins, 3 for
-highlands/ejecta, and impassable for mapped dunes), and roughness cost (1 at or
-below the high-roughness threshold or 10 above it; the default threshold is 10
-metres and scales with grid spacing). Mapped geology categories are a regional-scale
+highlands/ejecta, and impassable for mapped dunes), and roughness and local
+elevation-change costs (1/5/20/40 across the preferred/caution/high-risk
+threshold bands). The default roughness thresholds are 2/5/10 metres, and
+elevation-change thresholds are 5/15/30 metres; both scale with grid spacing.
+Non-restricted supplied hazard areas add a 20-point route cost, while restricted
+hazard buffers are impassable. These cost bands are conservative prototype
+settings, not NASA human-traverse standards. Mapped geology categories are a regional-scale
 text classification; they do not confirm surface material or stability.
 Thermal-color transitions remain a separate effort adjustment. Any-angle
 segments are accepted only when their sampled grid traversal avoids unknown
@@ -186,15 +190,19 @@ shallow, undersampled, or poorly resolved crater interiors may be missed, so
 the output cannot be described as crater-free. The local distance calculation
 is an approximation on Mars; the output is intentionally labelled low
 confidence. MOLA cannot resolve small rocks, cracks, or astronaut-scale
-hazards, and the result is not certified for mission use. The slope, roughness,
-elevation-change, and cost thresholds are prototype assumptions, not NASA
-human-traverse standards or NASA-endorsed route recommendations.
+hazards, and the result is not certified for mission use. NASA's cited
+elevation, thermal, and geology products do not provide a complete
+astronaut-scale hazard inventory or validated human-traverse safety thresholds.
+Hazards not represented in supplied data or resolvable by these products cannot
+be considered by the planner. The slope, roughness, elevation-change, and cost
+thresholds are prototype assumptions, not NASA human-traverse standards or
+NASA-endorsed route recommendations.
 
 Grid spacing can be selected from 250 to 2,000 metres. To keep external requests
 bounded, the grid is capped at 55 rows by 55 columns; longer routes increase
 their spacing to fit. Elevation requests are batched, with a bounded in-memory
-sample cache. The grid bounds, terrain thresholds, hazard buffer, thermal
-effort weight, NASA service URL, and cache limit are documented together in
+sample cache. The grid bounds, terrain thresholds, hazard buffer, cost
+penalties, thermal effort weight, NASA service URL, and cache limit are documented together in
 `backend/Services/TerrainNavigationConfig.js`.
 
 If a selected endpoint lands on unknown or restricted terrain, the planner

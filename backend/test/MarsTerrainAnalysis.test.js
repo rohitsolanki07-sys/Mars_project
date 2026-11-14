@@ -113,7 +113,7 @@ test('slope penalties follow the safe, moderate, and critical bands', () => {
   }
 });
 
-test('high roughness adds cost without making otherwise traversable ground impassable', () => {
+test('high roughness adds a strong cost without making ground impassable', () => {
   const grid = flatGrid(7, 7, 500);
   for (let row = 0; row < grid.rows; row += 1) {
     for (let column = 0; column < grid.columns; column += 1) {
@@ -123,9 +123,21 @@ test('high roughness adds cost without making otherwise traversable ground impas
   }
   const center = analyzeTerrain(grid)[3 * grid.columns + 3];
   assert.ok(center.roughnessMeters > 10);
-  assert.equal(center.roughnessPenalty, 10);
-  assert.equal(center.costScore, 12);
+  assert.equal(center.roughnessPenalty, 40);
+  assert.equal(center.costScore, 62);
   assert.equal(center.state, TERRAIN_STATES.HIGH_RISK);
+});
+
+test('elevation-change risk contributes to route cost', () => {
+  const grid = flatGrid(7, 7, 500);
+  grid.elevations[3 * grid.columns + 3] = 20;
+
+  const center = analyzeTerrain(grid)[3 * grid.columns + 3];
+
+  assert.equal(center.maxElevationChangeMeters, 20);
+  assert.equal(center.elevationChangePenalty, 20);
+  assert.equal(center.state, TERRAIN_STATES.HIGH_RISK);
+  assert.ok(center.costScore >= center.elevationChangePenalty);
 });
 
 test('crater-like closed depressions are blocked and routes detour around them', () => {
@@ -188,6 +200,32 @@ test('known circular hazards and their configured buffer are impassable', () => 
       bufferMeters: 500
     }
   ]), /starting coordinate is inside a restricted hazard/);
+});
+
+test('soft hazard zones add route cost and are avoided when a lower-cost detour exists', () => {
+  const grid = flatGrid(11, 11, 500);
+  grid.startCell = { row: 5, column: 1 };
+  grid.destinationCell = { row: 5, column: 9 };
+  grid.start = gridCellToCoordinate(grid, 5, 1);
+  grid.destination = gridCellToCoordinate(grid, 5, 9);
+  const hazard = {
+    name: 'Caution area',
+    center: gridCellToCoordinate(grid, 5, 5),
+    radiusMeters: 0,
+    bufferMeters: 0,
+    restricted: false
+  };
+
+  const result = calculateRoute(grid, [hazard]);
+  const hazardCell = result.routeCells.find(
+    (cell) => cell.hazardPenalty > 0
+  );
+
+  assert.equal(
+    analyzeTerrain(grid, [hazard])[5 * grid.columns + 5].hazardPenalty,
+    CONFIG.costWeights.softHazard
+  );
+  assert.equal(hazardCell, undefined);
 });
 
 test('moves an endpoint off unknown terrain to the nearest traversable cell', () => {
@@ -334,7 +372,7 @@ test('highland geology costs 3 and mapped dunes remain impassable', () => {
     polygon
   }])[3 * grid.columns + 3];
   assert.equal(highland.geologyPenalty, 3);
-  assert.equal(highland.costScore, 5);
+  assert.equal(highland.costScore, 6);
 
   const dunes = analyzeTerrain(grid, [], [{
     category: 'polar_dunes',

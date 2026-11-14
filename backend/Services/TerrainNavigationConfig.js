@@ -42,7 +42,12 @@ module.exports = Object.freeze({
     maximumBufferMeters: 5000
   }),
   costWeights: Object.freeze({
-    thermalTransition: 0.15
+    thermalTransition: 0.15,
+    preferred: 1,
+    caution: 5,
+    highRisk: 20,
+    severe: 40,
+    softHazard: 20
   }),
   unknownElevationPolicy: 'block',
   nasaMola: Object.freeze({

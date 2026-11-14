@@ -239,6 +239,13 @@ function getAxisGradient(center, before, after, spacing) {
   return null;
 }
 
+function terrainRiskPenalty(value, thresholds) {
+  if (value <= thresholds.preferred) return CONFIG.costWeights.preferred;
+  if (value <= thresholds.caution) return CONFIG.costWeights.caution;
+  if (value <= thresholds.highRisk) return CONFIG.costWeights.highRisk;
+  return CONFIG.costWeights.severe;
+}
+
 function getCraterDepthThresholdMeters(grid) {
   const config = CONFIG.craterDetection;
   return Math.max(
@@ -460,6 +467,7 @@ function analyzeTerrain(grid, hazards = [], geologyZones = []) {
     state: TERRAIN_STATES.UNKNOWN,
     slopePenalty: Infinity,
     roughnessPenalty: Infinity,
+    elevationChangePenalty: Infinity,
     costScore: Infinity,
     hazardPenalty: 0,
     geologyPenalty: 1,
@@ -555,9 +563,7 @@ function analyzeTerrain(grid, hazards = [], geologyZones = []) {
         roughnessMeters,
         maxElevationChangeMeters,
         state: TERRAIN_STATES.SAFE,
-        slopePenalty: 1,
-        roughnessPenalty:
-          roughnessMeters > roughnessThresholds.highRisk ? 10 : 1,
+        slopePenalty: CONFIG.costWeights.preferred,
         costScore: 0,
         hazardPenalty: 0,
         geologyPenalty: 1,
@@ -579,12 +585,20 @@ function analyzeTerrain(grid, hazards = [], geologyZones = []) {
     const elevationChange = cell.maxElevationChangeMeters;
     cell.slopePenalty =
       slope <= terrainConfig.slopeDegrees.preferred
-        ? 1
+        ? CONFIG.costWeights.preferred
         : slope <= terrainConfig.slopeDegrees.caution
-          ? 5
+          ? CONFIG.costWeights.caution
           : slope <= terrainConfig.slopeDegrees.highRisk
-            ? 20
+            ? CONFIG.costWeights.highRisk
             : Infinity;
+    cell.roughnessPenalty = terrainRiskPenalty(
+      roughness,
+      roughnessThresholds
+    );
+    cell.elevationChangePenalty = terrainRiskPenalty(
+      elevationChange,
+      elevationChangeThresholds
+    );
     if (
       slope > terrainConfig.slopeDegrees.highRisk ||
       elevationChange > elevationChangeThresholds.highRisk ||
@@ -606,7 +620,11 @@ function analyzeTerrain(grid, hazards = [], geologyZones = []) {
     }
 
     cell.costScore =
-      cell.slopePenalty + cell.geologyPenalty + cell.roughnessPenalty;
+      cell.slopePenalty +
+      cell.geologyPenalty +
+      cell.roughnessPenalty +
+      cell.elevationChangePenalty +
+      cell.hazardPenalty;
   });
 
   applyCraterDepressionMask(grid, cellAnalysis);
@@ -651,7 +669,7 @@ function applyGeologyZones(grid, cells, zones) {
         if (!pointInPolygon(local, polygon)) continue;
         if (isHazard) {
           cell.blockedByHazard = true;
-          cell.hazardPenalty = 1;
+          cell.hazardPenalty = 0;
           cell.state = TERRAIN_STATES.RESTRICTED;
         } else {
           cell.geologyPenalty = Math.max(
@@ -752,7 +770,7 @@ function applyHazards(grid, cells, hazards) {
           );
         }
         if (distance <= radiusMeters + bufferMeters) {
-          cell.hazardPenalty = restricted ? 1 : 0.75;
+          cell.hazardPenalty = restricted ? 0 : CONFIG.costWeights.softHazard;
           cell.blockedByHazard = restricted;
           if (restricted) cell.state = TERRAIN_STATES.RESTRICTED;
         }
