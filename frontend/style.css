@@ -4343,7 +4343,7 @@ html[data-theme="dark"] .mars-place-popup h3 {
 .tutorial-shell {
   display: flex;
   flex-direction: column;
-  max-height: min(760px, calc(100vh - 28px));
+  max-height: inherit;
 }
 
 .tutorial-header {
@@ -4540,6 +4540,36 @@ html[data-theme="dark"] .mars-place-popup h3 {
   background: rgba(153, 85, 24, 0.12);
   color: #ffd49a;
   font-size: 0.78rem;
+}
+
+.tutorial-step[data-tour-target="#calculateTerrainRouteBtn"] .tutorial-message {
+  max-height: 220px;
+  overflow-y: scroll;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(249, 115, 36, 0.55) rgba(255, 255, 255, 0.06);
+}
+
+.tutorial-step[data-tour-target="#calculateTerrainRouteBtn"] .tutorial-message::-webkit-scrollbar {
+  width: 8px;
+}
+
+.tutorial-step[data-tour-target="#calculateTerrainRouteBtn"] .tutorial-message::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  margin: 6px 0;
+}
+
+.tutorial-step[data-tour-target="#calculateTerrainRouteBtn"] .tutorial-message::-webkit-scrollbar-thumb {
+  background: rgba(249, 115, 36, 0.55);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.tutorial-step[data-tour-target="#calculateTerrainRouteBtn"] .tutorial-message::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 154, 80, 0.8);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 .tutorial-footer {
